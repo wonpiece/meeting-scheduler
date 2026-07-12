@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo } from "react";
 import arrowLeftIcon from "./assets/icons/icon-arrow-left-small-mono.svg?raw";
 import arrowRightIcon from "./assets/icons/icon-arrow-right-small-mono.svg?raw";
 import closeIcon from "./assets/icons/icon-x-mono.svg?raw";
@@ -96,9 +96,22 @@ function readStored(key, fallback) {
 function writeStored(key, value) {
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch {
-    // localStorage가 차단된 환경에서는 현재 세션 상태만 유지
+    return false;
   }
+}
+
+function usePersistentState(key, fallback) {
+  const [value, setValue] = useState(() => readStored(key, fallback));
+  const setPersistentValue = (nextValue) => {
+    setValue((currentValue) => {
+      const resolvedValue = typeof nextValue === "function" ? nextValue(currentValue) : nextValue;
+      writeStored(key, resolvedValue);
+      return resolvedValue;
+    });
+  };
+  return [value, setPersistentValue];
 }
 
 /* ============================================================
@@ -521,25 +534,18 @@ function Toggle({ options, value, onChange }) {
 const EMPTY_WIZARD = { step: "base", title: "", dateStr: "2026-07-12", startHour: 10, endHour: 11, durationMinutes: 60, roomRequired: true, forcedRoomId: null, purpose: PURPOSE_DEFAULT, attendees: { yj: "required" }, search: "" };
 
 export default function MeetingSchedulerApp() {
-  const [people, setPeople] = useState(() => readStored(STORAGE_KEYS.people, PEOPLE_BASE));
-  const [events, setEvents] = useState(() => readStored(STORAGE_KEYS.events, INITIAL_EVENTS));
+  const [people, setPeople] = usePersistentState(STORAGE_KEYS.people, PEOPLE_BASE);
+  const [events, setEvents] = usePersistentState(STORAGE_KEYS.events, INITIAL_EVENTS);
   const [visibleIds, setVisibleIds] = useState([ME_ID]);
   const [wizard, setWizard] = useState(null);
   const [detail, setDetail] = useState(null);
   const [toast, setToast] = useState(null);
   const [weekStart, setWeekStart] = useState(mondayOf(new Date(2026, 6, 13)));
-  const [rsvp, setRsvp] = useState(() => readStored(STORAGE_KEYS.rsvp, {})); // `${groupId}:${personId}` -> 'yes' | 'no'
+  const [rsvp, setRsvp] = usePersistentState(STORAGE_KEYS.rsvp, {}); // `${groupId}:${personId}` -> 'yes' | 'no'
   const [showAdmin, setShowAdmin] = useState(false);
-  const [companySettings, setCompanySettings] = useState(() => readStored(STORAGE_KEYS.companySettings, DEFAULT_COMPANY_SETTINGS));
-  const [rooms, setRooms] = useState(() => readStored(STORAGE_KEYS.rooms, ROOMS_BASE));
-  const [teams, setTeams] = useState(() => readStored(STORAGE_KEYS.teams, TEAMS_BASE));
-
-  useEffect(() => writeStored(STORAGE_KEYS.people, people), [people]);
-  useEffect(() => writeStored(STORAGE_KEYS.events, events), [events]);
-  useEffect(() => writeStored(STORAGE_KEYS.companySettings, companySettings), [companySettings]);
-  useEffect(() => writeStored(STORAGE_KEYS.rooms, rooms), [rooms]);
-  useEffect(() => writeStored(STORAGE_KEYS.teams, teams), [teams]);
-  useEffect(() => writeStored(STORAGE_KEYS.rsvp, rsvp), [rsvp]);
+  const [companySettings, setCompanySettings] = usePersistentState(STORAGE_KEYS.companySettings, DEFAULT_COMPANY_SETTINGS);
+  const [rooms, setRooms] = usePersistentState(STORAGE_KEYS.rooms, ROOMS_BASE);
+  const [teams, setTeams] = usePersistentState(STORAGE_KEYS.teams, TEAMS_BASE);
 
   const showToast = (message) => {
     setToast(message);
