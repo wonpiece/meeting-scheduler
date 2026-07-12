@@ -1,6 +1,7 @@
 export const C = {
   blue: "#3182f6",
   blue200: "#e7f0fe",
+  gray100: "#f2f4f6",
   ink900: "#323742",
   ink800: "#4c525d",
   ink600: "#6b7280",
@@ -38,8 +39,8 @@ export const cardStyle = {
 
 export const secondaryButtonStyle = {
   padding: "13px 20px",
-  background: "#F2F0E9",
-  color: "#1C1C1A",
+  background: C.gray100,
+  color: C.ink900,
   border: "none",
   borderRadius: 10,
   fontSize: 14,
@@ -50,6 +51,20 @@ export const secondaryButtonStyle = {
   alignItems: "center",
   justifyContent: "center",
   gap: 6,
+};
+
+export const primaryButtonStyle = {
+  border: "none",
+  borderRadius: 10,
+  height: 46,
+  minWidth: 120,
+  padding: "0 32px",
+  background: C.blue,
+  color: C.white,
+  fontFamily: FONT,
+  fontWeight: 500,
+  fontSize: 17,
+  cursor: "pointer",
 };
 
 export const sectionTitleStyle = {

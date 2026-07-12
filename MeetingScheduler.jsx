@@ -745,7 +745,7 @@ function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, rsv
 
 function Overlay({ children, onClose, width = 460, minHeight }) {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.25)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }} onClick={onClose}>
       <div style={{ background: C.white, borderRadius: 24, width, minHeight, maxWidth: "94vw", maxHeight: "88vh", overflowY: "auto", fontFamily: FONT, display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
         {children}
       </div>

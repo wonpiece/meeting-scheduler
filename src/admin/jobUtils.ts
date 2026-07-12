@@ -48,3 +48,46 @@ export function createJob(name = "New Role"): Job {
 export function resolveJobShort(jobs: Job[], roleName: string) {
   return jobs.find((job) => job.name === roleName)?.short ?? inferJobShort(roleName);
 }
+
+export function resolveJobRecord(jobs: Job[], roleName: string) {
+  const role = roleName.trim();
+  if (!role) return undefined;
+  return jobs.find(
+    (job) => job.name === role || job.short.toLowerCase() === role.toLowerCase(),
+  );
+}
+
+/** 직무 full name · short · 추론 축약명을 모두 검색어 후보로 반환 */
+export function getPersonRoleSearchTerms(jobs: Job[], roleName: string) {
+  const terms = new Set<string>();
+  const role = roleName.trim();
+  if (!role) return [];
+
+  terms.add(role);
+
+  const job = resolveJobRecord(jobs, role);
+  if (job) {
+    terms.add(job.name);
+    terms.add(job.short);
+  }
+
+  terms.add(inferJobShort(role));
+
+  return [...terms].filter(Boolean);
+}
+
+export function personMatchesRoleSearch(jobs: Job[], roleName: string, query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+
+  if (getPersonRoleSearchTerms(jobs, roleName).some((term) => term.toLowerCase().includes(q))) {
+    return true;
+  }
+
+  return jobs.some((job) => {
+    const catalogMatch =
+      job.name.toLowerCase().includes(q) || job.short.toLowerCase().includes(q);
+    if (!catalogMatch) return false;
+    return roleName === job.name || roleName.toLowerCase() === job.short.toLowerCase();
+  });
+}

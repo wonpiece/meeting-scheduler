@@ -25,7 +25,7 @@ export const PEOPLE_BASE: MockPerson[] = [
   { id: "ys", name: "염은솔", team: "그로스팀", role: "Operations Manager", tower: "solar타워", floor: 3, avatarBg: "#f3ebfc", avatarText: "#a66fd5" },
   { id: "jh", name: "박준호", team: "플랫폼팀", role: "Backend", tower: "미르타워", floor: 7, avatarBg: "#e0f2fe", avatarText: "#0369a1" },
   { id: "hr", name: "한소희", team: "플랫폼팀", role: "Frontend", tower: "미르타워", floor: 7, avatarBg: "#fce7f3", avatarText: "#be185d" },
-  { id: "dw", name: "도윤", team: "플랫폼팀", role: "Product Manager", tower: "미르타워", floor: 7, avatarBg: "#fef3c7", avatarText: "#b45309" },
+  { id: "dw", name: "박도윤", team: "플랫폼팀", role: "Product Manager", tower: "미르타워", floor: 7, avatarBg: "#fef3c7", avatarText: "#b45309" },
   { id: "es", name: "윤은서", team: "경영지원실", role: "Operations Manager", tower: "solar타워", floor: 2, avatarBg: "#ede9fe", avatarText: "#6d28d9" },
 ];
 

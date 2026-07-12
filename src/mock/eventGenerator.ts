@@ -23,6 +23,8 @@ export const MOCK_WEEK_COUNT = 3;
 
 const MIN_EVENT_DURATION_MIN = 30;
 const TIME_SNAP_MIN = 10;
+/** 구성원별 주간 일정 목표량 — 약 15% 감소 */
+const VOLUME_SCALE = 0.85;
 
 type GeneratorBounds = {
   lunchStart: number;
@@ -59,15 +61,41 @@ function snapStartHour(hour: number) {
 
 function clampScheduleStart(start: number, durationMinutes: number) {
   const maxStart = generatorBounds.bizEnd - durationMinutes / 60;
-  return snapStartHour(Math.min(maxStart, start));
+  const clamped = Math.max(generatorBounds.earliestEventStart, Math.min(maxStart, start));
+  return snapStartHour(clamped);
 }
 
 function sanitizeScheduleItem(item: DraftScheduleItem): DraftScheduleItem | null {
   const duration = snapDurationMinutes(item.duration);
   const start = clampScheduleStart(item.start, duration);
   if (start < generatorBounds.earliestEventStart) return null;
-  if (overlapsReservedCompanyTime(start, duration)) return null;
+  if (item.category === "lunch" || item.type === "lunch") {
+    if (!fitsInLunchWindow(start, duration)) return null;
+  } else if (overlapsReservedCompanyTime(start, duration)) {
+    return null;
+  }
   return { ...item, start, duration };
+}
+
+function isLunchBlock(block: ScheduleBlock) {
+  return block.category === "lunch" || block.type === "lunch";
+}
+
+function lunchWindowDurationMinutes() {
+  return Math.round((generatorBounds.lunchEnd - generatorBounds.lunchStart) * 60);
+}
+
+function lunchSlotStarts(): number[] {
+  const { lunchStart, lunchEnd } = generatorBounds;
+  const span = lunchEnd - lunchStart;
+  if (span <= 0.5) return [snapStartHour(lunchStart)];
+  const mid = lunchStart + span / 2;
+  return [lunchStart, mid].map(snapStartHour);
+}
+
+function fitsInLunchWindow(start: number, durationMinutes: number) {
+  const end = start + durationMinutes / 60;
+  return start >= generatorBounds.lunchStart - 1e-9 && end <= generatorBounds.lunchEnd + 1e-9;
 }
 
 /** 회사 점심·출근·퇴근 시간대와 겹치지 않는지 (관리 탭 회사 설정 기준) */
@@ -168,7 +196,10 @@ function applyPersonStartOffset(
 ) {
   const maxStart = generatorBounds.bizEnd - duration / 60;
   if (skipJitter) {
-    const adjusted = start + traits.startOffset * 0.3;
+    const adjusted = Math.max(
+      generatorBounds.earliestEventStart,
+      start + traits.startOffset * 0.3,
+    );
     const snapped = snapStartHour(adjusted);
     if (snapped < generatorBounds.earliestEventStart || snapped > maxStart) return null;
     return snapped;
@@ -198,6 +229,9 @@ function pickPersonDay(block: ScheduleBlock, random: RandomFn, traits: PersonCal
 }
 
 function pickPersonStart(block: ScheduleBlock, random: RandomFn, traits: PersonCalendarTraits) {
+  if (isLunchBlock(block)) {
+    return pickWithRandom(lunchSlotStarts(), random);
+  }
   if (block.category === "daily" && !block.skipJitter) return traits.dailyHour;
   const eligibleStarts = block.starts.filter((hour) => hour >= generatorBounds.earliestEventStart);
   if (eligibleStarts.length === 0) return generatorBounds.earliestEventStart;
@@ -206,6 +240,14 @@ function pickPersonStart(block: ScheduleBlock, random: RandomFn, traits: PersonC
 }
 
 function pickPersonDuration(block: ScheduleBlock, random: RandomFn, traits: PersonCalendarTraits) {
+  if (isLunchBlock(block)) {
+    const maxDur = lunchWindowDurationMinutes();
+    const durations = block.durations
+      .map((d) => Math.min(snapDurationMinutes(Math.max(MIN_EVENT_DURATION_MIN, d + traits.durationBias)), maxDur))
+      .filter((d) => d >= MIN_EVENT_DURATION_MIN && d <= maxDur);
+    if (durations.length === 0) return Math.min(maxDur, MIN_EVENT_DURATION_MIN);
+    return pickWithRandom(durations, random);
+  }
   const durations = block.durations.map((d) => Math.max(MIN_EVENT_DURATION_MIN, d + traits.durationBias));
   return snapDurationMinutes(pickWithRandom(durations, random));
 }
@@ -290,9 +332,22 @@ function addScheduleItem(
     const snapped = snapStartHour(fixedStart);
     start = snapped >= generatorBounds.earliestEventStart && snapped <= generatorBounds.bizEnd - duration / 60 ? snapped : null;
   } else {
-    start = applyPersonStartOffset(rawStart, traits, random, duration, block.skipJitter ?? false);
+    start = applyPersonStartOffset(
+      rawStart,
+      traits,
+      random,
+      duration,
+      (block.skipJitter ?? false) || isLunchBlock(block),
+    );
   }
   if (start == null || start < generatorBounds.earliestEventStart) return false;
+
+  const isLunch = isLunchBlock(block);
+  if (isLunch) {
+    if (!fitsInLunchWindow(start, duration)) return false;
+  } else if (overlapsReservedCompanyTime(start, duration)) {
+    return false;
+  }
 
   if (!force && block.category === "oneOnOne") {
     const dayCount = schedule.filter((item) => item.day === day && item.category === "oneOnOne").length;
@@ -300,7 +355,6 @@ function addScheduleItem(
   }
 
   if (!force && overlapsGenerated(schedule, day, start, duration)) return false;
-  if (overlapsReservedCompanyTime(start, duration)) return false;
 
   schedule.push({
     day,
@@ -410,8 +464,8 @@ export function buildWeekSchedule(person: MockPerson, week: number, traits?: Per
   });
 
   const [minCount, maxCount] = template.weeklyRange;
-  const scaledMin = Math.max(5, Math.round(minCount * weekMod.countScale) + personTraits.meetingCountBias);
-  const scaledMax = Math.max(scaledMin, Math.round(maxCount * weekMod.countScale) + personTraits.meetingCountBias);
+  const scaledMin = Math.max(5, Math.round(minCount * weekMod.countScale * VOLUME_SCALE) + personTraits.meetingCountBias);
+  const scaledMax = Math.max(scaledMin, Math.round(maxCount * weekMod.countScale * VOLUME_SCALE) + personTraits.meetingCountBias);
   const target = scaledMin + Math.floor(random() * (scaledMax - scaledMin + 1));
 
   let guard = 0;
@@ -445,8 +499,8 @@ export function buildWeekSchedule(person: MockPerson, week: number, traits?: Per
         id: "extra-lunch",
         category: "lunch",
         days: [0, 1, 2, 3, 4],
-        starts: [12, 12.5],
-        durations: [30, 60],
+        starts: lunchSlotStarts(),
+        durations: [30, Math.min(60, lunchWindowDurationMinutes())],
         titles: ["점심먹어요🍓", "조별 랜덤런치!", "런치 해요 🍚"],
         type: "lunch",
       },
@@ -503,7 +557,9 @@ function formatLocalDateTime(d: Date) {
 }
 
 function makeDateTime(baseMonday: Date, weekOffset: number, day: number, hour: number) {
-  const snappedHour = snapStartHour(Math.min(generatorBounds.bizEnd, hour));
+  const snappedHour = snapStartHour(
+    Math.max(generatorBounds.earliestEventStart, Math.min(generatorBounds.bizEnd, hour)),
+  );
   const d = new Date(baseMonday);
   d.setDate(d.getDate() + weekOffset * 7 + day);
   d.setHours(Math.floor(snappedHour), Math.round((snappedHour % 1) * 60), 0, 0);
@@ -511,7 +567,11 @@ function makeDateTime(baseMonday: Date, weekOffset: number, day: number, hour: n
 }
 
 /** 구성원 3주치 일정 — 주차·개인 seed마다 다른 패턴 */
-export function generateRoleEventsForPerson(person: MockPerson): GeneratedCalendarEvent[] {
+export function generateRoleEventsForPerson(
+  person: MockPerson,
+  companySettings: CompanyScheduleSettings = DEFAULT_COMPANY_SETTINGS,
+): GeneratedCalendarEvent[] {
+  configureEventGenerator(companySettings);
   const traits = derivePersonTraits(person);
   const events: GeneratedCalendarEvent[] = [];
   const baseMonday = MOCK_BASE_MONDAY;
@@ -613,9 +673,16 @@ function injectDemoGroupMeetings(
 
   const isOneOnOneMeeting = (title: string) => title.includes("1:1");
 
+  const isAllHandsTitle = (title: string) => /올핸즈|all-?hands/i.test(title);
+
+  const isDailyScrumTitle = (title: string) => (
+    /팀 데일리|데일리\s*스크럼|데일리스크럼|daily scrum|데일리 스탠드업|daily stand/i.test(title)
+  );
+
   const isTeamMeetingTitle = (title: string) => (
     /스크럼|Daily|싱크|플래닝|회의|리뷰|킥오프|얼라인|미팅|캘리브레이션/i.test(title)
     && !isOneOnOneMeeting(title)
+    && !isAllHandsTitle(title)
   );
 
   const teammatesFor = (personId: string, count: number) => {
@@ -628,6 +695,22 @@ function injectDemoGroupMeetings(
       .slice(0, count)
       .map((item) => item.id);
   };
+
+  const companyAttendeesFor = (hostId: string, totalCount: number, seed: string) => {
+    const mates = people
+      .filter((p) => p.id !== hostId)
+      .map((p) => ({ id: p.id, sort: hashString(`${seed}:${p.id}`) % 1000 }))
+      .sort((a, b) => a.sort - b.sort)
+      .slice(0, Math.max(0, totalCount - 1))
+      .map((item) => item.id);
+    return [hostId, ...mates];
+  };
+
+  const availableMatesFor = (personId: string, ev: GeneratedCalendarEvent, count: number) =>
+    teammatesFor(personId, count).filter((mateId) => {
+      const mateEvents = eventsByPerson[mateId] ?? [];
+      return !hasTimeOverlap(mateEvents, ev.start, ev.end);
+    });
 
   const attachGroupMeeting = (
     hostId: string,
@@ -666,6 +749,24 @@ function injectDemoGroupMeetings(
     }
   };
 
+  const attachTeamMeeting = (
+    hostId: string,
+    sourceEvent: GeneratedCalendarEvent,
+    preferredMateCount: number,
+    options: { allowSyntheticMeta?: boolean } = {},
+  ) => {
+    const mates = availableMatesFor(hostId, sourceEvent, preferredMateCount);
+    if (mates.length > 0) {
+      attachGroupMeeting(hostId, sourceEvent, mates);
+      return;
+    }
+    if (!options.allowSyntheticMeta) return;
+    const syntheticMates = teammatesFor(hostId, preferredMateCount);
+    if (syntheticMates.length >= 2) {
+      applyMeetingMeta(sourceEvent, [hostId, ...syntheticMates]);
+    }
+  };
+
   // 1) 1:1 → solo 참석자 메타 + movable
   for (const [personId, personEvents] of Object.entries(eventsByPerson)) {
     for (const ev of personEvents) {
@@ -676,23 +777,58 @@ function injectDemoGroupMeetings(
     }
   }
 
-  // 2) 팀 미팅 → 같은 팀 2~4명 groupId 공유
+  // 2) 올핸즈 · 데일리 · 팀 미팅 → 참석자 메타 보강
   for (const [personId, personEvents] of Object.entries(eventsByPerson)) {
     for (const ev of personEvents) {
-      if (ev.type !== "meeting" || ev.groupId) continue;
+      if (ev.type !== "meeting" || ev.groupId || ev.meetingMeta) continue;
+
+      if (isAllHandsTitle(ev.title)) {
+        const totalCount = 10 + (hashString(`${ev.id}:allhands`) % 6);
+        const attendeeIds = companyAttendeesFor(personId, totalCount, ev.id);
+        const mates = attendeeIds.filter((id) => id !== personId);
+        const attachableMates = mates.filter((mateId) => {
+          const mateEvents = eventsByPerson[mateId] ?? [];
+          return !hasTimeOverlap(mateEvents, ev.start, ev.end);
+        });
+        if (attachableMates.length >= 4) {
+          attachGroupMeeting(personId, ev, attachableMates);
+        } else {
+          applyMeetingMeta(ev, attendeeIds);
+        }
+        continue;
+      }
+
+      if (isDailyScrumTitle(ev.title)) {
+        attachTeamMeeting(personId, ev, 3, { allowSyntheticMeta: true });
+        continue;
+      }
+
       if (!isTeamMeetingTitle(ev.title)) continue;
 
       const roll = hashString(`${ev.id}:${ev.start}:group`) % 100;
-      if (roll >= 72) continue;
+      if (roll >= 40) continue;
 
-      const mateCount = 2 + (roll % 2);
-      const mates = teammatesFor(personId, mateCount).filter((mateId) => {
-        const mateEvents = eventsByPerson[mateId] ?? [];
-        return !hasTimeOverlap(mateEvents, ev.start, ev.end);
-      });
-      if (mates.length === 0) continue;
+      attachTeamMeeting(personId, ev, 2 + (roll % 2), { allowSyntheticMeta: true });
+    }
+  }
 
-      attachGroupMeeting(personId, ev, mates);
+  // 2b) 팀 성격인데 참석자 메타가 없는 미팅 보정
+  for (const [personId, personEvents] of Object.entries(eventsByPerson)) {
+    for (const ev of personEvents) {
+      if (ev.type !== "meeting" || ev.meetingMeta) continue;
+      if (isAllHandsTitle(ev.title)) {
+        applyMeetingMeta(ev, companyAttendeesFor(personId, 12, ev.id));
+        continue;
+      }
+      if (isDailyScrumTitle(ev.title)) {
+        const mates = teammatesFor(personId, 3);
+        if (mates.length >= 2) applyMeetingMeta(ev, [personId, ...mates.slice(0, 3)]);
+        continue;
+      }
+      if (isTeamMeetingTitle(ev.title)) {
+        const mates = teammatesFor(personId, 2 + (hashString(`${ev.id}:fix`) % 2));
+        if (mates.length >= 2) applyMeetingMeta(ev, [personId, ...mates]);
+      }
     }
   }
 

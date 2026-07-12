@@ -1,19 +1,24 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   PURPOSE_DEFAULT,
   buildPositiveValidationReasons,
   buildRecommendationRequest,
-  buildRecommendationFlowSummary,
   buildCandidateCoordinationHint,
   buildCandidateCoordinationSection,
+  buildCoordinationDraftMessage,
+  formatRelativeWeekdayLabel,
   generateCandidates,
+  getOccasionScheduleDefaults,
+  getRecommendationWeekDays,
   getReferenceCheckpoints,
   getRoomAssignmentReasonForCandidate,
   getValidationReasonInput,
   hourToTimeStr,
   isCandidateSelectable,
   isRequiredAttendanceMet,
+  resolveCheckpointBlockingEvent,
 } from "./config/recommendationPolicy";
+import { regeneratePersonDemoEvents } from "./admin/regenerateEvents";
 import {
   COLOR_PALETTE,
   DEFAULT_COMPANY_SETTINGS,
@@ -28,12 +33,13 @@ import {
   WEEK_DAYS,
 } from "./mock";
 import { AdminPanel } from "./admin/AdminPanel";
-import { resolveJobShort } from "./admin/jobUtils";
+import { resolveJobShort, personMatchesRoleSearch } from "./admin/jobUtils";
 import { PersonMeta } from "./components/PersonMeta";
 import {
   AI_LOADING_STEP_COUNT,
   AI_RESULTS_DELAY_MS,
-  AI_STEP_DURATION_MS,
+  AI_STEP_ACTIVE_MS,
+  AI_STEP_DONE_HOLD_MS,
   AiThinkingStepList,
 } from "./components/AiThinkingLoader";
 import arrowLeftIcon from "./assets/icons/icon-arrow-left-small-mono.svg?raw";
@@ -42,7 +48,9 @@ import closeIcon from "./assets/icons/icon-x-mono.svg?raw";
 import plusIcon from "./assets/icons/icon-plus-mono.svg?raw";
 import searchIcon from "./assets/icons/icon-search-mono.svg?raw";
 import checkIcon from "./assets/icons/icon-check-mono.svg?raw";
+import calendarCheckIcon from "./assets/icons/icon-check.svg?raw";
 import checkpointDotIcon from "./assets/icons/icon-checkpoint-dot-mono.svg?raw";
+import exclamationCircleIcon from "./assets/icons/icon-exclamation-circle-mono.svg?raw";
 import calendarIcon from "./assets/icons/icon-calendar-check-mono.svg?raw";
 import clockIcon from "./assets/icons/icon-clock-mono.svg?raw";
 import pinIcon from "./assets/icons/icon-pin-location-mono.svg?raw";
@@ -51,13 +59,16 @@ import circleIcon from "./assets/icons/icon-circle-empty-mono.svg?raw";
 import checkCircleIcon from "./assets/icons/icon-check-circle-line-mono.svg?raw";
 import checkCircleFilledIcon from "./assets/icons/icon-check-circle-mono.svg?raw";
 import pencilIcon from "./assets/icons/icon-pencil-mono.svg?raw";
+import copyIconUrl from "./assets/icons/icon-copy-mono.png";
 import settingIcon from "./assets/icons/icon-setting-mono.svg?raw";
 
 const ICONS = {
   ChevronLeft: arrowLeftIcon, ChevronRight: arrowRightIcon, X: closeIcon, Plus: plusIcon, Search: searchIcon, Check: checkIcon,
+  CalendarCheck: calendarCheckIcon,
   CalendarCheck2: calendarIcon, Clock: clockIcon, MapPin: pinIcon, Trash2: binIcon, Circle: circleIcon,
-  CheckCircle2: checkCircleIcon, CheckCircleFilled: checkCircleFilledIcon, Pencil: pencilIcon, Settings: settingIcon,
+  CheckCircle2: checkCircleIcon, CheckCircleFilled: checkCircleFilledIcon,   Pencil: pencilIcon, Settings: settingIcon,
   CheckpointDot: checkpointDotIcon,
+  ExclamationCircle: exclamationCircleIcon,
 };
 const normalizeSvg = (svg) => svg
   .replace(/width="[^"]*"/i, 'width="100%"')
@@ -82,7 +93,9 @@ const X = (p) => <SvgIcon name="X" {...p} />;
 const Plus = (p) => <SvgIcon name="Plus" {...p} />;
 const Search = (p) => <SvgIcon name="Search" {...p} />;
 const Check = (p) => <SvgIcon name="Check" {...p} />;
+const CalendarCheck = (p) => <SvgIcon name="CalendarCheck" {...p} />;
 const CheckpointDot = (p) => <SvgIcon name="CheckpointDot" {...p} />;
+const ExclamationCircle = (p) => <SvgIcon name="ExclamationCircle" {...p} />;
 const CalendarCheck2 = (p) => <SvgIcon name="CalendarCheck2" {...p} />;
 const Clock = (p) => <SvgIcon name="Clock" {...p} />;
 const MapPin = (p) => <SvgIcon name="MapPin" {...p} />;
@@ -91,6 +104,17 @@ const Circle = (p) => <SvgIcon name="Circle" {...p} />;
 const CheckCircle2 = (p) => <SvgIcon name="CheckCircle2" {...p} />;
 const CheckCircleFilled = (p) => <SvgIcon name="CheckCircleFilled" {...p} />;
 const Pencil = (p) => <SvgIcon name="Pencil" {...p} />;
+const Copy = ({ size = 24, style, ...props }) => (
+  <img
+    src={copyIconUrl}
+    alt=""
+    aria-hidden="true"
+    width={size}
+    height={size}
+    style={{ display: "inline-block", flexShrink: 0, lineHeight: 0, ...style }}
+    {...props}
+  />
+);
 const Settings = (p) => <SvgIcon name="Settings" {...p} />;
 
 /* ============================================================
@@ -100,6 +124,7 @@ const Settings = (p) => <SvgIcon name="Settings" {...p} />;
 const C = {
   blue: "#3182f6",
   blue200: "#e7f0fe",
+  gray100: "#f2f4f6",
   ink900: "#323742",
   ink800: "#4c525d",
   ink600: "#6b7280",
@@ -124,9 +149,8 @@ function sortByKoreanName(a, b) {
 function personMatchesAttendeeQuery(person, query, jobs) {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  const roleShort = resolveJobShort(jobs, person.role);
-  return [person.name, person.team, person.role, roleShort]
-    .some((value) => value.toLowerCase().includes(q));
+  return [person.name, person.team].some((value) => value.toLowerCase().includes(q))
+    || personMatchesRoleSearch(jobs, person.role, query);
 }
 
 function sortAttendeeSearchResults(people, query, visibleIds, excludeIds = [], jobs = []) {
@@ -149,6 +173,7 @@ function OptionalAttendeeToggle({ isOptional, onToggle }) {
   const [hover, setHover] = useState(false);
   return (
     <button
+      type="button"
       onClick={onToggle}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
@@ -174,10 +199,11 @@ function OptionalAttendeeToggle({ isOptional, onToggle }) {
   );
 }
 
-function AttendeeSearchRow({ person, jobs, isAdded, isActive, isHovered, anyHovered, onHover, onLeave, onToggle }) {
-  const highlighted = isHovered || (isActive && !anyHovered);
+function AttendeeSearchRow({ person, jobs, isAdded, isActive, isHovered, onHover, onLeave, onToggle, innerRef }) {
+  const highlighted = isHovered || isActive;
   return (
     <div
+      ref={innerRef}
       onClick={() => onToggle(person.id)}
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
@@ -200,6 +226,45 @@ function AttendeeSearchRow({ person, jobs, isAdded, isActive, isHovered, anyHove
   );
 }
 
+function RoomListRow({ room, isSelected, isHovered, onHover, onLeave, onSelect }) {
+  const highlighted = isHovered || isSelected;
+  return (
+    <div
+      onClick={() => onSelect(room.id)}
+      onMouseEnter={onHover}
+      onMouseLeave={onLeave}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        cursor: "pointer",
+        margin: "0 -8px",
+        padding: 8,
+        borderRadius: 10,
+        background: highlighted ? HOVER_OVERLAY : "transparent",
+        transition: "background 0.15s ease",
+      }}
+    >
+      <div
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: "50%",
+          background: C.bg2,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <MapPin size={16} color={C.ink500} />
+      </div>
+      <PersonMeta name={roomLabel(room)} team={`${room.capacity}인 수용`} />
+      {isSelected ? <CheckCircleFilled size={20} color={C.green500} /> : <Circle size={20} color={C.border} />}
+    </div>
+  );
+}
+
 function WizardAttendeeRow({ person, jobs, isOptional, onToggleOptional, onRemove }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -211,7 +276,7 @@ function WizardAttendeeRow({ person, jobs, isOptional, onToggleOptional, onRemov
         isHost={person.id === ME_ID}
       />
       <OptionalAttendeeToggle isOptional={isOptional} onToggle={onToggleOptional} />
-      <button onClick={onRemove} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+      <button type="button" onClick={onRemove} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
         <X size={14} color={C.ink500} />
       </button>
     </div>
@@ -219,37 +284,70 @@ function WizardAttendeeRow({ person, jobs, isOptional, onToggleOptional, onRemov
 }
 
 const MODAL_WIDTH = 460;
-const RECOMMEND_MODAL_WIDTH = 560;
+const RECOMMEND_MODAL_WIDTH = 512;
 const WIZARD_MODAL_MIN_HEIGHT = 560;
+const WIZARD_DETAILS_REVEAL_MAX = 1600;
+const WIZARD_DETAILS_REVEAL_MS = 490;
+const WIZARD_DETAILS_REVEAL_TRANSITION = `max-height ${WIZARD_DETAILS_REVEAL_MS}ms cubic-bezier(0.4, 0, 0.2, 1), opacity 0.36s ease, transform 0.36s cubic-bezier(0.4, 0, 0.2, 1)`;
 const HOVER_OVERLAY = "rgba(17,24,39,0.02)";
 const REASON_ROW_HEIGHT = 20;
-const CHECKPOINT_ROW_HEIGHT = 42;
-const CHECKPOINT_SECTION_HEADER = 28;
+const REFERENCE_CHECKPOINT_ROW_HEIGHT = 23;
+const COORDINATION_CHECKPOINT_ROW_HEIGHT = 20;
+const CHECKPOINT_SECTION_HEADER = 54;
 const COORDINATION_SECTION_HEADLINE_HEIGHT = 22;
-const COORDINATION_SECTION_GAP = 10;
-const COORDINATION_SECTION_MARGIN = 40;
+const COORDINATION_SECTION_GAP = 12;
+const COORDINATION_SECTION_MARGIN = 32;
 const SECTION_GAP = 32;
 const REASON_LIST_MARGIN_TOP = SECTION_GAP;
 const CHECKPOINT_SECTION_MARGIN = SECTION_GAP;
 const ROOM_SECTION_MARGIN = SECTION_GAP;
-const ROOM_PICKER_BLOCK_HEIGHT = 100;
-const RECOMMEND_EXIT_MS = 380;
-const RECOMMEND_HEADER_MORPH_MS = 400;
-const RECOMMEND_RESULTS_ENTER_MS = 500;
+const ROOM_PICKER_LABEL_HEIGHT = 30;
+const ROOM_PICKER_BUTTON_HEIGHT = 48;
+const ROOM_PICKER_BLOCK_HEIGHT = ROOM_PICKER_LABEL_HEIGHT + ROOM_PICKER_BUTTON_HEIGHT;
+const RECOMMEND_EXIT_MS = 330;
+const RECOMMEND_HEADER_MORPH_MS = 350;
+const RECOMMEND_RESULTS_ENTER_MS = 430;
+const RECOMMEND_MODAL_SIZE_ANIM_MS = 480;
 const RECOMMEND_EXIT_EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 const RECOMMEND_EXIT_TRANSITION = `opacity ${RECOMMEND_EXIT_MS}ms ease, transform ${RECOMMEND_EXIT_MS}ms ${RECOMMEND_EXIT_EASE}`;
 const REASON_ROW_GAP = 12;
 const CHECKPOINT_ROW_GAP = 12;
 const RECOMMENDATION_TOP_BAR_HEIGHT = 69;
-const RECOMMENDATION_DATE_SECTION_HEIGHT = 104;
 const RECOMMENDATION_FOOTER_HEIGHT = 80;
-const RECOMMENDATION_HEIGHT_BUFFER = 8;
+const RECOMMENDATION_HEIGHT_BUFFER = 32;
+
+function estimateReferenceCheckpointRowHeight(checkpoint) {
+  const text = `${checkpoint.title ?? ""} ${checkpoint.description ?? ""}`.trim();
+  const approxCharsPerLine = 34;
+  const lines = Math.max(1, Math.ceil(text.length / approxCharsPerLine));
+  return lines * REFERENCE_CHECKPOINT_ROW_HEIGHT;
+}
+
+function referenceCheckpointBlockHeight(checkpoints) {
+  if (checkpoints.length === 0) return 0;
+  const rowsH = checkpoints.reduce(
+    (sum, checkpoint) => sum + estimateReferenceCheckpointRowHeight(checkpoint),
+    0,
+  );
+  return (
+    CHECKPOINT_SECTION_HEADER
+    + rowsH
+    + (checkpoints.length - 1) * CHECKPOINT_ROW_GAP
+  );
+}
+
+function getRecommendationDateSectionHeight(hasCoordinationHint) {
+  const pagerH = 20;
+  const dateBlockH = 16 + 28 + 8 + 18;
+  const hintH = hasCoordinationHint ? 20 : 0;
+  return SECTION_GAP + pagerH + dateBlockH + hintH;
+}
 
 const STORAGE_KEYS = {
-  people: "meeting-scheduler:people-v4",
-  events: "meeting-scheduler:events-v18",
+  people: "meeting-scheduler:people-v5",
+  events: "meeting-scheduler:events-v22",
   jobs: "meeting-scheduler:jobs",
-  companySettings: "meeting-scheduler:company-settings",
+  companySettings: "meeting-scheduler:company-settings-v2",
   rooms: "meeting-scheduler:rooms",
   teams: "meeting-scheduler:teams",
   rsvp: "meeting-scheduler:rsvp-v3",
@@ -285,6 +383,22 @@ function usePersistentState(key, fallback) {
   return [value, setPersistentValue];
 }
 
+function useNowMinute() {
+  const [now, setNow] = useState(() => new Date());
+  React.useEffect(() => {
+    const tick = () => setNow(new Date());
+    const id = window.setInterval(tick, 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  return now;
+}
+
+function getTimeOfDayTop(now) {
+  return (now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600) * HOUR_HEIGHT;
+}
+
+const CURRENT_TIME_COLOR = "#ea4335";
+
 /* ============================================================
    1. DATA MODEL — seed는 src/mock/seedData.ts, 생성은 src/mock/eventGenerator.ts
    ============================================================ */
@@ -293,6 +407,18 @@ const timeStrToHour = (str) => {
   const [h, m] = str.split(":").map(Number);
   return h + m / 60;
 };
+
+function openNativeTimePicker(input) {
+  if (!input) return;
+  input.focus();
+  if (typeof input.showPicker === "function") {
+    try {
+      input.showPicker();
+    } catch {
+      // showPicker can throw if not triggered by user gesture in some browsers
+    }
+  }
+}
 
 function normalizeCompanySettings(value) {
   const source = value && typeof value === "object" ? value : {};
@@ -311,6 +437,8 @@ const TYPE_LABEL = { meeting: "미팅", focus: "집중 근무", personal: "개�
 const DAY_LABEL = ["월", "화", "수", "목", "금"];
 const HOUR_HEIGHT = 72;
 const CALENDAR_BODY_HEIGHT = 24 * HOUR_HEIGHT;
+/** Initial scroll: align current-time indicator near top with minimal past-hour padding */
+const CALENDAR_NOW_SCROLL_TOP_OFFSET = 16;
 
 /* ============================================================
    2. DATE HELPERS
@@ -320,8 +448,6 @@ const toDate = (s) => new Date(s);
 const addMin = (date, min) => new Date(date.getTime() + min * 60000);
 const pad2 = (n) => String(n).padStart(2, "0");
 const toLocalISO = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-const TODAY_DATE = 12; // 2026-07-12 (오늘)
-const DEMO_TODAY_STR = `2026-07-${pad2(TODAY_DATE)}`;
 const CALENDAR_TIME_COL_WIDTH = 64;
 function decHourToKorean(h) {
   const totalMin = Math.round(h * 60);
@@ -345,11 +471,29 @@ function addDays(date, n) {
   return d;
 }
 function dateOnlyStr(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
-const fmtAmPm = (d) => {
+function isSameCalendarDay(a, b) {
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
+}
+function getDemoTodayStr() {
+  return dateOnlyStr(new Date());
+}
+const fmtAmPmPart = (d, includePeriod = true) => {
   const h = d.getHours();
   const period = h < 12 ? "오전" : "오후";
   const hh = h % 12 === 0 ? 12 : h % 12;
-  return `${period} ${hh}시${d.getMinutes() ? ` ${d.getMinutes()}분` : ""}`;
+  const time = `${hh}시${d.getMinutes() ? ` ${d.getMinutes()}분` : ""}`;
+  return includePeriod ? `${period} ${time}` : time;
+};
+const fmtAmPm = (d) => fmtAmPmPart(d, true);
+const fmtAmPmRange = (start, end, separator = "~") => {
+  const startPeriod = start.getHours() < 12 ? "오전" : "오후";
+  const endPeriod = end.getHours() < 12 ? "오전" : "오후";
+  if (startPeriod === endPeriod) {
+    return `${startPeriod} ${fmtAmPmPart(start, false)}${separator}${fmtAmPmPart(end, false)}`;
+  }
+  return `${fmtAmPmPart(start)}${separator}${fmtAmPmPart(end)}`;
 };
 const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
 const fmtDate = (d) => `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAY[d.getDay()]})`;
@@ -366,26 +510,28 @@ function Avatar({ person, size = 32 }) {
   );
 }
 
-function PrimaryButton({ children, onClick, disabled, style }) {
+function PrimaryButton({ children, onClick, disabled, style, type = "button", compact = false, ...rest }) {
   const [hover, setHover] = useState(false);
   return (
     <button
+      type={type}
       onClick={onClick} disabled={disabled}
       onMouseEnter={() => !disabled && setHover(true)}
       onMouseLeave={() => setHover(false)}
+      {...rest}
       style={{
         background: hover && !disabled ? "#2b74de" : C.blue,
         color: C.white,
         border: "none",
         borderRadius: 10,
-        height: 46,
-        padding: "2px 32px",
+        height: compact ? 42 : 46,
+        padding: compact ? "2px 12px" : "2px 32px",
         fontFamily: FONT,
         fontWeight: 500,
         fontSize: 17,
         cursor: disabled ? "default" : "pointer",
         opacity: disabled ? 0.3 : 1,
-        minWidth: 140,
+        minWidth: compact ? 120 : 140,
         transition: "background 0.15s ease",
         ...style,
       }}
@@ -394,10 +540,11 @@ function PrimaryButton({ children, onClick, disabled, style }) {
     </button>
   );
 }
-function SecondaryButton({ children, onClick, disabled, style }) {
+function SecondaryButton({ children, onClick, disabled, style, type = "button", compact = false }) {
   const [hover, setHover] = useState(false);
   return (
     <button
+      type={type}
       onClick={onClick}
       disabled={disabled}
       onMouseEnter={() => !disabled && setHover(true)}
@@ -407,16 +554,38 @@ function SecondaryButton({ children, onClick, disabled, style }) {
         color: C.ink900,
         border: "none",
         borderRadius: 10,
-        height: 46,
-        padding: "2px 32px",
+        height: compact ? 42 : 46,
+        padding: compact ? "2px 12px" : "2px 32px",
         fontFamily: FONT,
         fontWeight: 500,
         fontSize: 17,
         cursor: disabled ? "default" : "pointer",
-        minWidth: 140,
+        minWidth: compact ? 120 : 140,
         transition: "background 0.15s ease",
         ...style,
       }}
+    >
+      {children}
+    </button>
+  );
+}
+function OutlineSurfaceButton({ children, onClick, style, type = "button", defaultBackground = C.white, ...rest }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        border: `1px solid ${C.border}`,
+        background: hover ? C.bg2 : defaultBackground,
+        transition: "background 0.15s ease",
+        cursor: "pointer",
+        boxSizing: "border-box",
+        ...style,
+      }}
+      {...rest}
     >
       {children}
     </button>
@@ -428,6 +597,7 @@ function Toggle({ options, value, onChange }) {
     <div style={{ display: "flex", gap: 6 }}>
       {options.map(([label, val]) => (
         <button
+          type="button"
           key={label}
           onClick={() => onChange(val)}
           onMouseEnter={() => setHoverKey(label)}
@@ -453,11 +623,274 @@ function Toggle({ options, value, onChange }) {
   );
 }
 
+function WizardDurationToggle({ dateStr, startHour, endHour, durationMinutes, durationPreset, onSelectPreset, onOpenCustom, onClearCustom }) {
+  const [hoverKey, setHoverKey] = useState(null);
+  const customReady = durationPreset === "custom" && startHour != null && endHour != null;
+  const customLabel = customReady
+    ? formatScheduleLabel(dateStr, startHour, durationMinutes, endHour)
+    : null;
+
+  const pillStyle = (selected, hoverLabel) => ({
+    height: 36,
+    borderRadius: 8,
+    border: "none",
+    padding: "8px 12px",
+    fontFamily: FONT,
+    fontWeight: 500,
+    fontSize: 15,
+    cursor: "pointer",
+    background: selected ? C.blue200 : hoverKey === hoverLabel ? "#e4e7ea" : C.bg2,
+    color: selected ? C.blue : C.ink900,
+    transition: "background 0.15s ease",
+  });
+
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <button
+        type="button"
+        onClick={() => onSelectPreset(60)}
+        onMouseEnter={() => setHoverKey("1시간")}
+        onMouseLeave={() => setHoverKey(null)}
+        style={pillStyle(durationPreset === 60, "1시간")}
+      >
+        1시간
+      </button>
+      <button
+        type="button"
+        onClick={() => onSelectPreset(30)}
+        onMouseEnter={() => setHoverKey("30분")}
+        onMouseLeave={() => setHoverKey(null)}
+        style={pillStyle(durationPreset === 30, "30분")}
+      >
+        30분
+      </button>
+      {customReady ? (
+        <div
+          style={{
+            height: 36,
+            borderRadius: 8,
+            padding: "0 8px 0 12px",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            background: C.blue200,
+            color: C.blue,
+          }}
+        >
+          <button
+            type="button"
+            onClick={onOpenCustom}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              margin: 0,
+              fontFamily: FONT,
+              fontWeight: 500,
+              fontSize: 15,
+              color: C.blue,
+              cursor: "pointer",
+              lineHeight: "20px",
+            }}
+          >
+            {customLabel}
+          </button>
+          <button
+            type="button"
+            aria-label="직접 선택 시간 초기화"
+            onClick={onClearCustom}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 2,
+              margin: 0,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              lineHeight: 0,
+            }}
+          >
+            <X size={14} color={C.blue} />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={onOpenCustom}
+          onMouseEnter={() => setHoverKey("직접 선택")}
+          onMouseLeave={() => setHoverKey(null)}
+          style={pillStyle(false, "직접 선택")}
+        >
+          직접 선택
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ============================================================
    5. APP
    ============================================================ */
 
-const EMPTY_WIZARD = { step: "base", title: "", dateStr: "2026-07-12", startHour: 10, endHour: 11, durationMinutes: 60, roomRequired: true, forcedRoomId: null, purpose: PURPOSE_DEFAULT, attendees: { yj: "required" }, search: "" };
+const EMPTY_WIZARD = { step: "base", title: "", dateStr: "2026-07-12", startHour: 10, endHour: 11, durationMinutes: 60, durationPreset: 60, roomRequired: true, forcedRoomId: null, purpose: PURPOSE_DEFAULT, attendees: { yj: "required" }, search: "", editGroupId: null, basePhase: "title" };
+
+function inferDurationPreset(durationMinutes) {
+  if (durationMinutes === 60) return 60;
+  if (durationMinutes === 30) return 30;
+  return "custom";
+}
+
+function dateToWizardFields(start, end) {
+  const dateStr = `${start.getFullYear()}-${pad2(start.getMonth() + 1)}-${pad2(start.getDate())}`;
+  const startHour = start.getHours() + start.getMinutes() / 60;
+  const endHour = end.getHours() + end.getMinutes() / 60;
+  const durationMinutes = Math.max(30, Math.round((end.getTime() - start.getTime()) / 60000));
+  return { dateStr, startHour, endHour, durationMinutes };
+}
+
+function wizardFromMeeting(groupId, title, meta) {
+  const start = toDate(meta.start);
+  const end = toDate(meta.end);
+  const { dateStr, startHour, endHour, durationMinutes } = dateToWizardFields(start, end);
+  const attendees = {};
+  (meta.requiredIds ?? []).forEach((id) => { attendees[id] = "required"; });
+  (meta.optionalIds ?? []).forEach((id) => { attendees[id] = "optional"; });
+  return {
+    step: "quickBase",
+    origin: "toolbar",
+    editGroupId: groupId,
+    basePhase: "details",
+    title,
+    dateStr,
+    startHour,
+    endHour,
+    durationMinutes,
+    durationPreset: inferDurationPreset(durationMinutes),
+    roomRequired: Boolean(meta.room),
+    forcedRoomId: meta.room?.id ?? null,
+    attendees: Object.keys(attendees).length > 0 ? attendees : { [ME_ID]: "required" },
+  };
+}
+
+function wizardBaseStep(origin) {
+  return origin === "toolbar" ? "quickBase" : "base";
+}
+
+function returnToBaseWizard(wizard, extra = {}) {
+  return {
+    ...wizard,
+    step: wizardBaseStep(wizard.origin),
+    basePhase: "details",
+    ...extra,
+  };
+}
+
+function WizardDatetimeStep({ wizard, setWizard, onClose, disableBackdropClose, exitConfirm }) {
+  const startTimeRef = useRef(null);
+  const endTimeRef = useRef(null);
+  const hasStart = wizard.startHour != null;
+  const hasEnd = wizard.endHour != null;
+  const updateStart = (value) => {
+    if (!value) {
+      setWizard({ ...wizard, startHour: null, endHour: null, durationMinutes: "custom" });
+      return;
+    }
+    const nextStart = timeStrToHour(value);
+    const nextEnd = hasEnd ? Math.max(wizard.endHour, nextStart + 0.5) : null;
+    setWizard({
+      ...wizard,
+      startHour: nextStart,
+      endHour: nextEnd,
+      durationMinutes: nextEnd != null ? Math.round((nextEnd - nextStart) * 60) : "custom",
+    });
+  };
+  const updateEnd = (value) => {
+    if (!value) {
+      setWizard({ ...wizard, endHour: null, durationMinutes: "custom" });
+      return;
+    }
+    const nextEnd = timeStrToHour(value);
+    if (!hasStart) {
+      setWizard({ ...wizard, endHour: nextEnd, durationMinutes: "custom" });
+      return;
+    }
+    const safeEnd = Math.max(nextEnd, wizard.startHour + 0.5);
+    setWizard({ ...wizard, endHour: safeEnd, durationMinutes: Math.round((safeEnd - wizard.startHour) * 60) });
+  };
+  const inputWrap = { ...fieldButtonStyle, padding: "0 12px", cursor: "pointer", gap: 8 };
+  const inputInner = { border: "none", outline: "none", background: "transparent", color: C.black, fontFamily: FONT, fontWeight: 500, fontSize: 17, width: "100%", flex: 1, minWidth: 0 };
+  const timeFieldWrap = { position: "relative", flex: 1, minWidth: 0, display: "flex", alignItems: "center", cursor: "pointer" };
+  const timePlaceholder = { position: "absolute", left: 0, color: C.ink500, fontFamily: FONT, fontWeight: 500, fontSize: 17, pointerEvents: "none", zIndex: 0 };
+  const datetimeReady = hasStart && hasEnd;
+  return (
+    <Overlay onClose={onClose} disableBackdropClose={disableBackdropClose} exitConfirm={exitConfirm}>
+      <PanelHeader title="언제로 할까요?" onClose={onClose} />
+      <div style={{ padding: "10px 24px", display: "flex", flexDirection: "column", gap: 24 }}>
+        <Field label="날짜">
+          <div className="wizard-outline-control" style={{ ...inputWrap, cursor: "text" }}>
+            <CalendarCheck2 size={20} color={C.ink600} />
+            <input type="date" className="wizard-datetime-input" value={wizard.dateStr || getDemoTodayStr()} onChange={(e) => setWizard({ ...wizard, dateStr: e.target.value })} style={inputInner} />
+          </div>
+        </Field>
+        <Field label="시작 시간">
+          <div className="wizard-outline-control" style={inputWrap} onClick={() => openNativeTimePicker(startTimeRef.current)}>
+            <Clock size={20} color={C.ink600} />
+            <div style={timeFieldWrap}>
+              {!hasStart && <span style={timePlaceholder}>시작 시간 선택</span>}
+              <input
+                ref={startTimeRef}
+                type="time"
+                className="wizard-datetime-input"
+                value={hasStart ? hourToTimeStr(wizard.startHour) : ""}
+                onChange={(e) => updateStart(e.target.value)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openNativeTimePicker(e.currentTarget);
+                }}
+                style={{ ...inputInner, color: hasStart ? C.black : "transparent", position: "relative", zIndex: 1 }}
+              />
+            </div>
+          </div>
+        </Field>
+        <Field label="종료 시간">
+          <div className="wizard-outline-control" style={inputWrap} onClick={() => openNativeTimePicker(endTimeRef.current)}>
+            <Clock size={20} color={C.ink600} />
+            <div style={timeFieldWrap}>
+              {!hasEnd && <span style={timePlaceholder}>종료 시간 선택</span>}
+              <input
+                ref={endTimeRef}
+                type="time"
+                className="wizard-datetime-input"
+                value={hasEnd ? hourToTimeStr(wizard.endHour) : ""}
+                min={hasStart ? hourToTimeStr(wizard.startHour + 0.5) : undefined}
+                onChange={(e) => updateEnd(e.target.value)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openNativeTimePicker(e.currentTarget);
+                }}
+                style={{ ...inputInner, color: hasEnd ? C.black : "transparent", position: "relative", zIndex: 1 }}
+              />
+            </div>
+          </div>
+        </Field>
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "20px 24px 24px 24px", marginTop: "auto" }}>
+        <SecondaryButton compact onClick={() => setWizard(returnToBaseWizard(wizard))}>이전</SecondaryButton>
+        <PrimaryButton compact disabled={!datetimeReady} onClick={() => setWizard(returnToBaseWizard(wizard, { durationPreset: "custom" }))}>확인</PrimaryButton>
+      </div>
+    </Overlay>
+  );
+}
+
+function eventsExcludingGroup(events, groupId) {
+  if (!groupId) return events;
+  const next = {};
+  Object.entries(events).forEach(([personId, list]) => {
+    next[personId] = list.filter((event) => event.groupId !== groupId);
+  });
+  return next;
+}
 
 let cachedInitialSeed = null;
 function createInitialSeed() {
@@ -477,15 +910,110 @@ function createInitialRsvp() {
   return createInitialSeed().rsvp;
 }
 
+const TOAST_ENTER_MS = 280;
+const TOAST_HOLD_MS = 1000;
+const TOAST_EXIT_MS = 280;
+
+function ToastBanner({ message, viewDetail, onDismiss, onViewDetail }) {
+  const [entered, setEntered] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => setEntered(true));
+    });
+    const leaveTimer = setTimeout(() => setLeaving(true), TOAST_ENTER_MS + TOAST_HOLD_MS);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(leaveTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!leaving) return undefined;
+    const timer = setTimeout(onDismiss, TOAST_EXIT_MS);
+    return () => clearTimeout(timer);
+  }, [leaving, onDismiss]);
+
+  const animating = leaving || !entered;
+  const slideMs = leaving ? TOAST_EXIT_MS : TOAST_ENTER_MS;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 24,
+        left: "50%",
+        transform: entered && !leaving
+          ? "translate(-50%, 0)"
+          : "translate(-50%, calc(-100% - 32px))",
+        opacity: entered && !leaving ? 1 : 0,
+        transition: animating
+          ? `transform ${slideMs}ms ${leaving ? "ease-in" : "ease-out"}, opacity ${slideMs}ms ${leaving ? "ease-in" : "ease-out"}`
+          : "none",
+        background: C.ink900,
+        color: C.white,
+        borderRadius: 9999,
+        padding: "18px 24px",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        fontFamily: FONT,
+        fontWeight: 500,
+        fontSize: 17,
+        zIndex: 100,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
+        pointerEvents: entered && !leaving ? "auto" : "none",
+      }}
+    >
+      <div style={{ width: 20, height: 20, borderRadius: "50%", background: C.green500, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <Check size={13} color={C.white} />
+      </div>
+      <span>{message}</span>
+      {viewDetail && (
+        <button
+          type="button"
+          onClick={onViewDetail}
+          style={{
+            background: "none",
+            border: "none",
+            color: C.white,
+            fontFamily: FONT,
+            fontWeight: 500,
+            fontSize: 17,
+            textDecoration: "underline",
+            textUnderlineOffset: 2,
+            cursor: "pointer",
+            padding: 0,
+            flexShrink: 0,
+          }}
+        >
+          보기
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function MeetingSchedulerApp() {
   const [people, setPeople] = usePersistentState(STORAGE_KEYS.people, PEOPLE_BASE);
   const [events, setEvents] = usePersistentState(STORAGE_KEYS.events, createInitialEvents());
   const [visibleIds, setVisibleIds] = useState([ME_ID]);
   const [wizard, setWizard] = useState(null);
+  const [wizardSession, setWizardSession] = useState(0);
+  const openWizard = (initial) => {
+    setWizardSession((session) => session + 1);
+    setWizard({ ...EMPTY_WIZARD, ...initial });
+  };
   const [detail, setDetail] = useState(null);
   const [toast, setToast] = useState(null);
-  const toastTimerRef = React.useRef(null);
-  const [weekStart, setWeekStart] = useState(mondayOf(new Date(2026, 6, 13)));
+  const toastIdRef = useRef(0);
+  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
+  const [miniCalendarResetKey, setMiniCalendarResetKey] = useState(0);
+  const goToToday = () => {
+    setWeekStart(mondayOf(new Date()));
+    setMiniCalendarResetKey((key) => key + 1);
+  };
   const [rsvp, setRsvp] = usePersistentState(STORAGE_KEYS.rsvp, createInitialRsvp()); // `${groupId}:${personId}` -> 'yes' | 'no'
   const [showAdmin, setShowAdmin] = useState(false);
   const [companySettings, setCompanySettings] = usePersistentState(
@@ -497,9 +1025,8 @@ export default function MeetingSchedulerApp() {
   const [jobs, setJobs] = usePersistentState(STORAGE_KEYS.jobs, JOBS_BASE);
 
   const showToast = (message, viewDetail) => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setToast({ message, viewDetail });
-    toastTimerRef.current = setTimeout(() => setToast(null), 2600);
+    toastIdRef.current += 1;
+    setToast({ message, viewDetail, id: toastIdRef.current });
   };
 
   const openCreatedMeeting = (viewDetail) => {
@@ -520,6 +1047,13 @@ export default function MeetingSchedulerApp() {
   };
 
   const toggleVisible = (id) => setVisibleIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const resetAllCalendarEvents = () => {
+    setVisibleIds([ME_ID]);
+    setEvents((prev) => people.reduce(
+      (acc, person) => (person.id === ME_ID ? acc : regeneratePersonDemoEvents(acc, person)),
+      prev,
+    ));
+  };
 
   const addEventsForAttendees = (attendeeIds, eventData, groupId) => {
     setEvents((prev) => {
@@ -534,24 +1068,175 @@ export default function MeetingSchedulerApp() {
       Object.keys(prev).forEach((id) => { next[id] = prev[id].filter((e) => e.groupId !== groupId); });
       return next;
     });
+    setRsvp((prev) => {
+      const prefix = `${groupId}:`;
+      const next = { ...prev };
+      Object.keys(next).forEach((key) => {
+        if (key.startsWith(prefix)) delete next[key];
+      });
+      return next;
+    });
   };
-  // 참석자가 나뿐일 때: 추천 없이 바로 그 시간에 일정 생성
-  const quickCreate = (title, dateStr, startHour, durationMinutes, attendeeIds, roomId) => {
-    const start = `${dateStr}T${hourToTimeStr(startHour)}:00`;
-    const end = toLocalISO(addMin(toDate(start), durationMinutes));
-    const room = rooms.find((r) => r.id === roomId);
-    const groupId = `mtg-${Date.now()}`;
-    const meetingMeta = {
-      requiredIds: attendeeIds,
-      optionalIds: [],
+  const applyAutoRsvpForCreatedMeeting = (groupId, attendeeIds) => {
+    setRsvp((prev) => {
+      const next = { ...prev };
+      attendeeIds.forEach((id) => {
+        next[`${groupId}:${id}`] = "yes";
+      });
+      return next;
+    });
+  };
+  const updateEvent = (personId, eventId, patch) => {
+    setEvents((prev) => {
+      const list = prev[personId] || [];
+      const target = list.find((e) => e.id === eventId);
+      if (!target) return prev;
+      const next = { ...prev };
+      if (target.groupId) {
+        Object.keys(prev).forEach((id) => {
+          next[id] = prev[id].map((e) => (e.groupId === target.groupId ? { ...e, ...patch } : e));
+        });
+      } else {
+        next[personId] = list.map((e) => (e.id === eventId ? { ...e, ...patch } : e));
+      }
+      return next;
+    });
+  };
+  const updateMeetingGroup = (groupId, { title, start, end, requiredIds, optionalIds, room, checkpoints, attendeeIds }) => {
+    const sharedMeta = {
+      requiredIds,
+      optionalIds,
       room,
-      checkpoints: [],
       start,
       end,
     };
-    const eventTitle = title || "새 일정";
-    addEventsForAttendees(attendeeIds, { title: eventTitle, start, end, visibility: "public", type: "meeting", movable: false, room, meetingMeta }, groupId);
-    showToast("일정이 생성되었어요.", { meta: meetingMeta, title: eventTitle, groupId, personId: ME_ID });
+    const eventPayloadBase = {
+      title,
+      start,
+      end,
+      visibility: "public",
+      type: "meeting",
+      movable: false,
+      room,
+    };
+    const attendeeSet = new Set(attendeeIds);
+
+    setEvents((prev) => {
+      const next = { ...prev };
+      Object.keys(prev).forEach((personId) => {
+        next[personId] = (prev[personId] || []).filter(
+          (event) => event.groupId !== groupId || attendeeSet.has(personId),
+        );
+      });
+      attendeeIds.forEach((personId) => {
+        const meetingMeta = {
+          ...sharedMeta,
+          checkpoints: personId === ME_ID ? (checkpoints ?? []) : [],
+        };
+        const eventPayload = { ...eventPayloadBase, meetingMeta };
+        const existing = (next[personId] || []).find((event) => event.groupId === groupId);
+        if (existing) {
+          next[personId] = next[personId].map((event) => (
+            event.groupId === groupId ? { ...event, ...eventPayload } : event
+          ));
+        } else {
+          next[personId] = [...(next[personId] || []), { ...eventPayload, id: `${groupId}-${personId}`, groupId }];
+        }
+      });
+      return next;
+    });
+
+    setRsvp((prev) => {
+      const prefix = `${groupId}:`;
+      const next = { ...prev };
+      Object.keys(next).forEach((key) => {
+        if (key.startsWith(prefix) && !attendeeSet.has(key.slice(prefix.length))) {
+          delete next[key];
+        }
+      });
+      attendeeIds.forEach((id) => {
+        if (!next[`${groupId}:${id}`]) next[`${groupId}:${id}`] = "yes";
+      });
+      return next;
+    });
+  };
+  const openMeetingEditor = (groupId, meta, title) => {
+    setDetail(null);
+    openWizard(wizardFromMeeting(groupId, title, meta));
+  };
+  const saveMeetingFromWizard = ({
+    editGroupId,
+    title,
+    start,
+    end,
+    requiredIds,
+    optionalIds,
+    room,
+    checkpoints,
+  }) => {
+    const attendeeIds = [...requiredIds, ...optionalIds];
+    const meetingMeta = { requiredIds, optionalIds, room, checkpoints: checkpoints ?? [], start, end };
+    if (editGroupId) {
+      updateMeetingGroup(editGroupId, {
+        title,
+        start,
+        end,
+        requiredIds,
+        optionalIds,
+        room,
+        checkpoints,
+        attendeeIds,
+      });
+      return { groupId: editGroupId, meta: meetingMeta, title, personId: ME_ID };
+    }
+    const groupId = `mtg-${Date.now()}`;
+    setEvents((prev) => {
+      const next = { ...prev };
+      const sharedMeta = { requiredIds, optionalIds, room, start, end };
+      attendeeIds.forEach((personId) => {
+        const meetingMeta = {
+          ...sharedMeta,
+          checkpoints: personId === ME_ID ? (checkpoints ?? []) : [],
+        };
+        next[personId] = [...(next[personId] || []), {
+          title,
+          start,
+          end,
+          visibility: "public",
+          type: "meeting",
+          movable: false,
+          room,
+          meetingMeta,
+          id: `${groupId}-${personId}`,
+          groupId,
+        }];
+      });
+      return next;
+    });
+    applyAutoRsvpForCreatedMeeting(groupId, attendeeIds);
+    return { groupId, meta: meetingMeta, title, personId: ME_ID };
+  };
+  const openBlockingEventFromCheckpoint = (checkpoint, proposal) => {
+    const resolved = resolveCheckpointBlockingEvent(checkpoint, events);
+    if (!resolved) return;
+    const owner = people.find((p) => p.id === resolved.personId);
+    const coordinationDraft = proposal && owner && wizard && resolved.personId !== ME_ID
+      ? buildCoordinationDraftMessage({
+        ownerFullName: owner.name,
+        blockingTitle: resolved.event.title,
+        blockingStart: toDate(resolved.event.start),
+        blockingEnd: toDate(resolved.event.end),
+        proposedTitle: proposal.proposedTitle,
+        proposedStart: proposal.proposedStart,
+        proposedEnd: proposal.proposedEnd,
+      })
+      : undefined;
+    setDetail({
+      personId: resolved.personId,
+      ev: resolved.event,
+      allowReschedule: true,
+      coordinationDraft,
+    });
   };
 
   return (
@@ -561,23 +1246,39 @@ export default function MeetingSchedulerApp() {
           <CalendarCheck2 size={20} color={C.ink900} />
           <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 21, color: C.ink900 }}>회사 캘린더</span>
         </div>
-        <button onClick={() => setShowAdmin(true)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center", gap: 6, color: C.ink600, fontFamily: FONT, fontSize: 13 }}>
-          <Settings size={17} /> 관리
-        </button>
+        <OutlineSurfaceButton
+          data-tour="admin-settings"
+          aria-label="관리"
+          onClick={() => setShowAdmin(true)}
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 8,
+            padding: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          <Settings size={14} color={C.ink500} />
+        </OutlineSurfaceButton>
       </div>
       <div style={{ display: "flex", gap: 44, flex: 1, minHeight: 0, overflow: "hidden", paddingTop: 24 }}>
-        <Sidebar people={people} visibleIds={visibleIds} toggleVisible={toggleVisible} onCreate={() => setWizard({ ...EMPTY_WIZARD, step: "quickBase", origin: "toolbar", roomRequired: true })} weekStart={weekStart} setWeekStart={setWeekStart} />
+        <Sidebar people={people} visibleIds={visibleIds} toggleVisible={toggleVisible} onResetAllCalendars={resetAllCalendarEvents} onCreate={() => openWizard({ step: "quickBase", origin: "toolbar", roomRequired: true })} weekStart={weekStart} setWeekStart={setWeekStart} miniCalendarResetKey={miniCalendarResetKey} />
         <CalendarGrid
-          people={people} visibleIds={visibleIds} events={events} weekStart={weekStart} setWeekStart={setWeekStart} rsvp={rsvp} companySettings={companySettings}
-          onEmptyClick={(day, hour) => setWizard({ ...EMPTY_WIZARD, origin: "calendar", dateStr: day, startHour: hour })}
+          people={people} visibleIds={visibleIds} events={events} weekStart={weekStart} setWeekStart={setWeekStart} onGoToday={goToToday} rsvp={rsvp} companySettings={companySettings}
+          onEmptyClick={(day, hour) => openWizard({ origin: "calendar", dateStr: day, startHour: hour, endHour: hour + 1 })}
           onEventClick={(personId, ev) => setDetail({ personId, ev })}
         />
       </div>
 
       {detail && (
         detail.ev.meetingMeta ? (
-          <ConfirmedDetailModal data={{ meta: detail.ev.meetingMeta, title: detail.ev.title, groupId: detail.ev.groupId }} people={people} onClose={() => setDetail(null)}
-            onDelete={() => { deleteMeetingGroup(detail.ev.groupId); setDetail(null); }} rsvp={rsvp} setRsvp={setRsvp} />
+          <ConfirmedDetailModal personId={detail.personId} data={{ meta: detail.ev.meetingMeta, title: detail.ev.title, groupId: detail.ev.groupId }} people={people} onClose={() => setDetail(null)}
+            onEdit={detail.personId === ME_ID ? () => openMeetingEditor(detail.ev.groupId, detail.ev.meetingMeta, detail.ev.title) : undefined}
+            onDelete={detail.personId === ME_ID ? () => { deleteMeetingGroup(detail.ev.groupId); setDetail(null); } : undefined}
+            rsvp={rsvp} setRsvp={setRsvp} />
         ) : (
           <EventDetailModal
             personId={detail.personId}
@@ -585,60 +1286,76 @@ export default function MeetingSchedulerApp() {
             people={people}
             events={events}
             jobs={jobs}
+            allowReschedule={detail.allowReschedule}
+            coordinationDraft={detail.coordinationDraft}
+            overlayZIndex={detail.allowReschedule && wizard ? 60 : 50}
+            onReschedule={(patch) => {
+              updateEvent(detail.personId, detail.ev.id, patch);
+              setDetail(null);
+              if (detail.allowReschedule && detail.personId === ME_ID) {
+                showToast("일정을 변경했어요.");
+              }
+            }}
             onClose={() => setDetail(null)}
+            onCopySuggestion={() => showToast("텍스트를 복사했어요.")}
             onDelete={() => {
               if (detail.ev.groupId) deleteMeetingGroup(detail.ev.groupId);
               else setEvents((prev) => ({ ...prev, [detail.personId]: prev[detail.personId].filter((e) => e.id !== detail.ev.id) }));
               setDetail(null);
+              if (detail.allowReschedule && detail.personId === ME_ID) {
+                showToast("일정을 삭제했어요.");
+              }
             }}
           />
         )
       )}
 
       {wizard && (
-        <CreationWizard wizard={wizard} setWizard={setWizard} people={people} jobs={jobs} events={events} companySettings={companySettings} rooms={rooms} visibleIds={visibleIds} onClose={() => setWizard(null)}
+        <CreationWizard key={wizardSession} wizard={wizard} setWizard={setWizard} people={people} jobs={jobs} events={eventsExcludingGroup(events, wizard.editGroupId)} companySettings={companySettings} rooms={rooms} visibleIds={visibleIds} onClose={() => setWizard(null)}
+          onOpenBlockingEvent={openBlockingEventFromCheckpoint}
           onQuickCreate={(title, dateStr, startHour, durationMinutes, attendeeIds, roomId) => {
-            quickCreate(title, dateStr, startHour, durationMinutes, attendeeIds, roomId);
+            const start = `${dateStr}T${hourToTimeStr(startHour)}:00`;
+            const end = toLocalISO(addMin(toDate(start), durationMinutes));
+            const room = rooms.find((r) => r.id === roomId);
+            const requiredIds = attendeeIds.filter((id) => wizard.attendees[id] === "required");
+            const optionalIds = attendeeIds.filter((id) => wizard.attendees[id] === "optional");
+            const saved = saveMeetingFromWizard({
+              editGroupId: wizard.editGroupId,
+              title: title || "새 일정",
+              start,
+              end,
+              requiredIds: requiredIds.length ? requiredIds : attendeeIds,
+              optionalIds,
+              room,
+              checkpoints: [],
+            });
             setWizard(null);
+            showToast(wizard.editGroupId ? "일정이 수정되었어요." : "일정이 생성되었어요.", saved);
           }}
           onConfirm={(candidate, requiredIds, optionalIds, title) => {
-            const attendeeIds = [...requiredIds, ...optionalIds];
-            const groupId = `mtg-${Date.now()}`;
-            const meetingMeta = { requiredIds, optionalIds, room: candidate.selectedRoom, checkpoints: candidate.checkpoints, start: toLocalISO(candidate.start), end: toLocalISO(candidate.end) };
-            addEventsForAttendees(attendeeIds, { title, start: toLocalISO(candidate.start), end: toLocalISO(candidate.end), visibility: "public", type: "meeting", movable: false, meetingMeta }, groupId);
+            const saved = saveMeetingFromWizard({
+              editGroupId: wizard.editGroupId,
+              title,
+              start: toLocalISO(candidate.start),
+              end: toLocalISO(candidate.end),
+              requiredIds,
+              optionalIds,
+              room: candidate.selectedRoom,
+              checkpoints: candidate.checkpoints,
+            });
             setWizard(null);
-            showToast("일정이 생성되었어요.", { meta: meetingMeta, title, groupId, personId: ME_ID });
+            showToast(wizard.editGroupId ? "일정이 수정되었어요." : "일정이 생성되었어요.", saved);
           }} />
       )}
 
       {toast && (
-        <div style={{ position: "fixed", top: 24, left: "50%", transform: "translateX(-50%)", background: C.ink900, color: C.white, borderRadius: 9999, padding: "18px 24px", display: "flex", alignItems: "center", gap: 12, fontFamily: FONT, fontWeight: 500, fontSize: 17, zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.2)" }}>
-          <div style={{ width: 20, height: 20, borderRadius: "50%", background: C.green500, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <Check size={13} color={C.white} />
-          </div>
-          <span>{toast.message}</span>
-          {toast.viewDetail && (
-            <button
-              type="button"
-              onClick={() => openCreatedMeeting(toast.viewDetail)}
-              style={{
-                background: "none",
-                border: "none",
-                color: C.white,
-                fontFamily: FONT,
-                fontWeight: 500,
-                fontSize: 17,
-                textDecoration: "underline",
-                textUnderlineOffset: 2,
-                cursor: "pointer",
-                padding: 0,
-                flexShrink: 0,
-              }}
-            >
-              보기
-            </button>
-          )}
-        </div>
+        <ToastBanner
+          key={toast.id}
+          message={toast.message}
+          viewDetail={toast.viewDetail}
+          onDismiss={() => setToast(null)}
+          onViewDetail={() => openCreatedMeeting(toast.viewDetail)}
+        />
       )}
 
       {showAdmin && (
@@ -670,47 +1387,135 @@ export default function MeetingSchedulerApp() {
 
 /* ---------- Sidebar (미니 캘린더 + 캘린더 목록) ---------- */
 
-function MiniMonth({ weekStart, setWeekStart }) {
-  const days = Array.from({ length: 31 }, (_, i) => i + 1);
-  const firstDow = 2; // 2026-07-01은 수요일 (월=0 기준 인덱스 2)
+function MiniMonthDay({ day, isWeekend, isToday, onClick }) {
+  const [hover, setHover] = useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        position: "relative",
+        border: "none",
+        margin: 0,
+        width: "100%",
+        boxSizing: "border-box",
+        padding: "4px 0",
+        background: "transparent",
+        cursor: "pointer",
+        fontFamily: FONT,
+        fontSize: 15,
+        fontWeight: isToday ? 700 : 500,
+        color: isToday ? C.blue : isWeekend ? C.ink400 : C.ink900,
+        textAlign: "center",
+        lineHeight: "20px",
+        overflow: "visible",
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: "50%",
+          transform: "translate(-50%, -50%)",
+          width: 28,
+          height: 28,
+          borderRadius: 8,
+          background: hover ? C.bg2 : "transparent",
+          pointerEvents: "none",
+          transition: "background 0.15s ease",
+        }}
+      />
+      <span style={{ position: "relative" }}>{day}</span>
+    </button>
+  );
+}
+
+function MiniMonth({ weekStart, setWeekStart, miniCalendarResetKey = 0 }) {
+  const [viewMonth, setViewMonth] = useState(() => new Date(weekStart.getFullYear(), weekStart.getMonth(), 1));
+  const [navHover, setNavHover] = useState(null);
+
+  React.useEffect(() => {
+    setViewMonth(new Date(weekStart.getFullYear(), weekStart.getMonth(), 1));
+  }, [weekStart.getFullYear(), weekStart.getMonth()]);
+
+  React.useEffect(() => {
+    if (miniCalendarResetKey === 0) return;
+    const today = new Date();
+    setViewMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+  }, [miniCalendarResetKey]);
+
+  const displayYear = viewMonth.getFullYear();
+  const displayMonth = viewMonth.getMonth();
+  const daysInMonth = new Date(displayYear, displayMonth + 1, 0).getDate();
+  const firstDow = (new Date(displayYear, displayMonth, 1).getDay() + 6) % 7;
+  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const cells = [...Array(firstDow).fill(null), ...days];
-  const weekStartDate = weekStart.getDate();
-  const weekEndDate = addDays(weekStart, 4).getDate();
+  const today = new Date();
+
+  const navBtnStyle = (side) => ({
+    border: "none",
+    background: navHover === side ? C.bg2 : "none",
+    borderRadius: 6,
+    width: 24,
+    height: 24,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    padding: 0,
+  });
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 16, color: C.ink900 }}>2026년 7월</span>
-        <div style={{ display: "flex", gap: 10 }}>
-          <ChevronLeft size={14} color={C.ink600} />
-          <ChevronRight size={14} color={C.ink600} />
+        <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 16, color: C.ink900 }}>
+          {displayYear}년 {displayMonth + 1}월
+        </span>
+        <div style={{ display: "flex", gap: 4 }}>
+          <button
+            type="button"
+            aria-label="이전 달"
+            onClick={() => setViewMonth((month) => new Date(month.getFullYear(), month.getMonth() - 1, 1))}
+            onMouseEnter={() => setNavHover("left")}
+            onMouseLeave={() => setNavHover(null)}
+            style={navBtnStyle("left")}
+          >
+            <ChevronLeft size={14} color={C.ink600} />
+          </button>
+          <button
+            type="button"
+            aria-label="다음 달"
+            onClick={() => setViewMonth((month) => new Date(month.getFullYear(), month.getMonth() + 1, 1))}
+            onMouseEnter={() => setNavHover("right")}
+            onMouseLeave={() => setNavHover(null)}
+            style={navBtnStyle("right")}
+          >
+            <ChevronRight size={14} color={C.ink600} />
+          </button>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", rowGap: 10, fontSize: 11, color: C.ink600, textAlign: "center", marginBottom: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", rowGap: 10, fontSize: 11, color: C.ink600, marginBottom: 10 }}>
         {["월", "화", "수", "목", "금", "토", "일"].map((d, i) => (
-          <span key={d} style={{ color: i >= 5 ? C.ink500 : C.ink600 }}>{d}</span>
+          <span key={d} style={{ color: i >= 5 ? C.ink500 : C.ink600, textAlign: "center" }}>{d}</span>
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", rowGap: 6, fontSize: 15, fontFamily: FONT, fontWeight: 500 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", rowGap: 6, overflow: "visible" }}>
         {cells.map((d, i) => {
-          if (!d) return <span key={i} />;
+          if (!d) return <span key={i} aria-hidden="true" />;
           const isWeekend = (i % 7) >= 5;
-          const isToday = d === TODAY_DATE;
+          const isToday = isSameCalendarDay(new Date(displayYear, displayMonth, d), today);
           return (
-            <div
+            <MiniMonthDay
               key={i}
-              onClick={() => setWeekStart(mondayOf(new Date(2026, 6, d)))}
-              style={{
-                textAlign: "center", cursor: "pointer", padding: "6px 0", borderRadius: 8,
-                background: "transparent",
-                color: isToday ? C.blue : isWeekend ? C.ink400 : C.ink900,
-                fontWeight: isToday ? 700 : 500,
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(49,130,246,0.08)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-            >
-              {d}
-            </div>
+              day={d}
+              isWeekend={isWeekend}
+              isToday={isToday}
+              onClick={() => setWeekStart(mondayOf(new Date(displayYear, displayMonth, d)))}
+            />
           );
         })}
       </div>
@@ -718,32 +1523,78 @@ function MiniMonth({ weekStart, setWeekStart }) {
   );
 }
 
-function Sidebar({ people, visibleIds, toggleVisible, onCreate, weekStart, setWeekStart }) {
+function CalendarListItem({ person, checked, onToggle }) {
+  const [hover, setHover] = useState(false);
+  const isMe = person.id === ME_ID;
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{ display: "flex", alignItems: "center" }}
+    >
+      <div
+        onClick={onToggle}
+        style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", flex: 1, minWidth: 0 }}
+      >
+        <div
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: 4,
+            background: checked ? person.avatarText : "none",
+            border: checked ? "none" : `1.5px solid ${hover ? C.blue : C.border}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "border-color 0.15s ease",
+            flexShrink: 0,
+          }}
+        >
+          {checked && <CalendarCheck size={14} color={C.white} />}
+        </div>
+        <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>
+          {person.name}{isMe ? " (나)" : ""}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Sidebar({ people, visibleIds, toggleVisible, onResetAllCalendars, onCreate, weekStart, setWeekStart, miniCalendarResetKey }) {
   const sortedPeople = useMemo(() => {
     const me = people.find((p) => p.id === ME_ID);
     const rest = people.filter((p) => p.id !== ME_ID).sort(sortByKoreanName);
     return me ? [me, ...rest] : rest;
   }, [people]);
+  const hasOtherVisible = visibleIds.some((id) => id !== ME_ID);
   return (
-    <div style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 40 }}>
-      <PrimaryButton onClick={onCreate} style={{ width: "100%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+    <div style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+      <PrimaryButton data-tour="create-schedule" onClick={onCreate} style={{ width: "100%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 28 }}>
         <Plus size={18} /> 일정 추가하기
       </PrimaryButton>
-      <MiniMonth weekStart={weekStart} setWeekStart={setWeekStart} />
-      <div>
-        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 16, color: C.ink900, marginBottom: 16 }}>캘린더 목록</div>
+      <MiniMonth weekStart={weekStart} setWeekStart={setWeekStart} miniCalendarResetKey={miniCalendarResetKey} />
+      <div style={{ marginTop: 40 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 16, color: C.ink900 }}>캘린더 목록</div>
+          {hasOtherVisible && (
+            <button
+              type="button"
+              className="calendar-list-reset-btn"
+              onClick={onResetAllCalendars}
+            >
+              초기화
+            </button>
+          )}
+        </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {sortedPeople.map((p) => {
-            const checked = visibleIds.includes(p.id);
-            return (
-              <div key={p.id} onClick={() => toggleVisible(p.id)} style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
-                <div style={{ width: 20, height: 20, borderRadius: 4, background: checked ? p.avatarText : "none", border: checked ? "none" : `1.5px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {checked && <Check size={14} color={C.white} />}
-                </div>
-                <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{p.name}{p.id === ME_ID ? " (나)" : ""}</span>
-              </div>
-            );
-          })}
+          {sortedPeople.map((p) => (
+            <CalendarListItem
+              key={p.id}
+              person={p}
+              checked={visibleIds.includes(p.id)}
+              onToggle={() => toggleVisible(p.id)}
+            />
+          ))}
         </div>
       </div>
     </div>
@@ -752,20 +1603,63 @@ function Sidebar({ people, visibleIds, toggleVisible, onCreate, weekStart, setWe
 
 /* ---------- Calendar grid ---------- */
 
-function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, rsvp, companySettings, onEmptyClick, onEventClick }) {
+function CalendarNowIndicator({ top, variant = "day" }) {
+  if (variant === "time") {
+    return (
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: top - 5,
+          right: -5,
+          width: 10,
+          height: 10,
+          borderRadius: "50%",
+          background: CURRENT_TIME_COLOR,
+          zIndex: 4,
+          pointerEvents: "none",
+        }}
+      />
+    );
+  }
+
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: "absolute",
+        top: top - 1,
+        left: 0,
+        right: 0,
+        height: 2,
+        background: CURRENT_TIME_COLOR,
+        zIndex: 4,
+        pointerEvents: "none",
+      }}
+    />
+  );
+}
+
+function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, onGoToday, rsvp, companySettings, onEmptyClick, onEventClick }) {
   const hours = [];
   for (let h = 0; h <= 23; h++) hours.push(h);
   const hourText = (h) => (h < 12 ? `오전 ${h === 0 ? 12 : h}시` : `오후 ${h === 12 ? 12 : h - 12}시`);
   const scrollRef = React.useRef(null);
+  const didInitialScrollRef = React.useRef(false);
+  const now = useNowMinute();
 
   React.useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = Math.max(0, companySettings.commuteIn * HOUR_HEIGHT - 16);
-    }
-  }, [companySettings.commuteIn, weekStart]);
+    if (!scrollRef.current || didInitialScrollRef.current) return;
+    const el = scrollRef.current;
+    el.scrollTop = Math.max(0, getTimeOfDayTop(new Date()) - CALENDAR_NOW_SCROLL_TOP_OFFSET);
+    didInitialScrollRef.current = true;
+  }, []);
 
   const displayDates = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
   const displayDays = displayDates.map(dateOnlyStr);
+  const todayStr = getDemoTodayStr();
+  const nowTop = getTimeOfDayTop(now);
+  const showNowIndicator = displayDays.includes(todayStr);
   const rangeLabel = `${weekStart.getMonth() + 1}월 ${weekStart.getDate()}일 - ${displayDates[4].getMonth() + 1}월 ${displayDates[4].getDate()}일`;
 
   const NavBtn = ({ onClick, children }) => {
@@ -782,18 +1676,32 @@ function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, rsv
     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, flexShrink: 0, marginTop: -8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 21, color: C.ink900 }}>{rangeLabel}</span>
+          <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 19, color: C.ink900 }}>{rangeLabel}</span>
           <div style={{ display: "flex", gap: 4 }}>
             <NavBtn onClick={() => setWeekStart((w) => addDays(w, -7))}><ChevronLeft size={20} color={C.ink600} /></NavBtn>
             <NavBtn onClick={() => setWeekStart((w) => addDays(w, 7))}><ChevronRight size={20} color={C.ink600} /></NavBtn>
           </div>
-          <button onClick={() => setWeekStart(mondayOf(new Date(2026, 6, TODAY_DATE)))} style={{ border: `1px solid ${C.border}`, borderRadius: 8, height: 36, padding: "8px 12px", background: "none", fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900, cursor: "pointer" }}>오늘</button>
+          <OutlineSurfaceButton
+            onClick={onGoToday}
+            defaultBackground="transparent"
+            style={{
+              borderRadius: 8,
+              height: 36,
+              padding: "8px 12px",
+              fontFamily: FONT,
+              fontWeight: 500,
+              fontSize: 15,
+              color: C.ink900,
+            }}
+          >
+            오늘
+          </OutlineSurfaceButton>
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: `${CALENDAR_TIME_COL_WIDTH}px repeat(5, 1fr)`, flexShrink: 0 }}>
         <div />
         {displayDates.map((date, i) => {
-          const isToday = date.getDate() === TODAY_DATE && date.getMonth() === 6;
+          const isToday = isSameCalendarDay(date, new Date());
           return (
             <div key={displayDays[i]} style={{ textAlign: "center", padding: "16px 0" }}>
               <div style={{ fontFamily: FONT, fontSize: 17, color: isToday ? C.blue : C.ink500, marginBottom: 4 }}>{DAY_LABEL[i]}</div>
@@ -803,12 +1711,13 @@ function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, rsv
         })}
       </div>
       <div ref={scrollRef} style={{ position: "relative", display: "grid", gridTemplateColumns: `${CALENDAR_TIME_COL_WIDTH}px repeat(5, 1fr)`, flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 24, borderTop: `1px solid ${C.border}` }}>
-        <div style={{ minHeight: CALENDAR_BODY_HEIGHT }}>
+        <div style={{ minHeight: CALENDAR_BODY_HEIGHT, position: "relative" }}>
           {hours.map((h) => (
             <div key={h} style={{ height: HOUR_HEIGHT, fontSize: 13, fontFamily: FONT, fontWeight: 500, color: C.ink500, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", transform: "translateY(-8px)" }}>
               {hourText(h)}
             </div>
           ))}
+          {showNowIndicator && <CalendarNowIndicator top={nowTop} variant="time" />}
         </div>
         {displayDays.map((day) => (
           <div key={day} style={{ position: "relative", borderLeft: `1px solid ${C.bg2}`, minHeight: CALENDAR_BODY_HEIGHT }}>
@@ -829,6 +1738,8 @@ function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, rsv
                 onMouseEnter={(e) => { e.currentTarget.style.background = HOVER_OVERLAY; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }} />
             ))}
+
+            {day === todayStr && showNowIndicator && <CalendarNowIndicator top={nowTop} />}
 
             {visibleIds.map((personId, pIdx) => {
               const person = people.find((p) => p.id === personId);
@@ -885,7 +1796,7 @@ function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, rsv
                         {ev.title}
                       </div>
                       <div style={{ fontFamily: FONT, fontSize: 13, color: secondaryColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: isCompact ? 1 : undefined }}>
-                        {fmtAmPm(s)}~{fmtAmPm(e)}
+                        {fmtAmPmRange(s, e)}
                       </div>
                     </div>
                   </div>
@@ -901,12 +1812,106 @@ function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, rsv
 
 /* ---------- shared modal shell ---------- */
 
-function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, animateSize = false, disableBackdropClose = false }) {
+function WizardExitConfirmDialog({ onCancel, onConfirm, zIndex = 60 }) {
+  const [confirmHover, setConfirmHover] = useState(false);
   return (
     <div
-      style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16 }}
-      onClick={disableBackdropClose ? undefined : onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex,
+        background: "rgba(17,24,39,0.25)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+      onClick={onCancel}
     >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wizard-exit-confirm-title"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: C.white,
+          borderRadius: 24,
+          width: 280,
+          maxWidth: "94vw",
+          padding: 20,
+          boxSizing: "border-box",
+        }}
+      >
+        <div
+          id="wizard-exit-confirm-title"
+          style={{
+            fontFamily: FONT,
+            fontWeight: 600,
+            fontSize: 17,
+            color: C.ink900,
+            textAlign: "left",
+            lineHeight: 1.4,
+          }}
+        >
+          일정 추가를 그만할까요?
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <SecondaryButton compact onClick={onCancel} style={{ flex: 1, minWidth: 0 }}>닫기</SecondaryButton>
+          <button
+            type="button"
+            onClick={onConfirm}
+            onMouseEnter={() => setConfirmHover(true)}
+            onMouseLeave={() => setConfirmHover(false)}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              background: confirmHover ? "#e5484d" : "#f04452",
+              color: C.white,
+              border: "none",
+              borderRadius: 10,
+              height: 42,
+              padding: "2px 12px",
+              fontFamily: FONT,
+              fontWeight: 500,
+              fontSize: 17,
+              cursor: "pointer",
+              transition: "background 0.15s ease",
+            }}
+          >
+            그만하기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, animateSize = false, disableBackdropClose = false, exitConfirm, zIndex = 50 }) {
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+
+  const handleBackdropClick = () => {
+    if (disableBackdropClose) {
+      if (exitConfirm) setShowExitConfirm(true);
+      return;
+    }
+    onClose?.();
+  };
+
+  return (
+    <>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(17,24,39,0.25)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex,
+          padding: 16,
+        }}
+        onClick={handleBackdropClick}
+      >
       <div
         style={{
           background: C.white,
@@ -924,7 +1929,7 @@ function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, an
           flexDirection: "column",
           transition:
             animateSize && height != null
-              ? "height 0.56s cubic-bezier(0.4, 0, 0.2, 1), min-height 0.56s cubic-bezier(0.4, 0, 0.2, 1), width 0.56s cubic-bezier(0.4, 0, 0.2, 1)"
+              ? `height ${RECOMMEND_MODAL_SIZE_ANIM_MS}ms cubic-bezier(0.4, 0, 0.2, 1), min-height ${RECOMMEND_MODAL_SIZE_ANIM_MS}ms cubic-bezier(0.4, 0, 0.2, 1), width ${RECOMMEND_MODAL_SIZE_ANIM_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`
               : undefined,
         }}
         onClick={(e) => e.stopPropagation()}
@@ -932,24 +1937,212 @@ function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, an
         {children}
       </div>
     </div>
+      {showExitConfirm && exitConfirm && (
+        <WizardExitConfirmDialog
+          zIndex={zIndex + 10}
+          onCancel={() => setShowExitConfirm(false)}
+          onConfirm={() => {
+            setShowExitConfirm(false);
+            exitConfirm.onConfirm?.();
+          }}
+        />
+      )}
+    </>
   );
 }
-function PanelHeader({ title, onClose }) {
+const MODAL_HEADER_INSET = 24;
+const MODAL_HEADER_ICON_SIZE = 16;
+const MODAL_HEADER_ICON_GAP = 20;
+const MODAL_HEADER_ICON_HOVER_SIZE = 24;
+const modalHeaderIconBtnStyle = {
+  background: "none",
+  border: "none",
+  padding: 0,
+  margin: 0,
+  width: MODAL_HEADER_ICON_SIZE,
+  height: MODAL_HEADER_ICON_SIZE,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
+  lineHeight: 0,
+};
+function ModalHeaderIconButton({ onClick, children, disabled = false, title, ariaLabel, style }) {
+  const [hover, setHover] = useState(false);
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "24px 24px 20px 24px" }}>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={ariaLabel}
+      onMouseEnter={() => !disabled && setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        ...modalHeaderIconBtnStyle,
+        position: "relative",
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.4 : 1,
+        overflow: "visible",
+        ...style,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          width: MODAL_HEADER_ICON_HOVER_SIZE,
+          height: MODAL_HEADER_ICON_HOVER_SIZE,
+          marginTop: -MODAL_HEADER_ICON_HOVER_SIZE / 2,
+          marginLeft: -MODAL_HEADER_ICON_HOVER_SIZE / 2,
+          borderRadius: 6,
+          background: C.bg2,
+          opacity: hover && !disabled ? 1 : 0,
+          pointerEvents: "none",
+        }}
+      />
+      <span style={{ position: "relative", zIndex: 1, display: "inline-flex", lineHeight: 0 }}>
+        {children}
+      </span>
+    </button>
+  );
+}
+function ModalCloseButton({ onClick, iconColor = C.ink600, size = 16, anchored = false }) {
+  return (
+    <ModalHeaderIconButton
+      onClick={onClick}
+      ariaLabel="닫기"
+      style={{
+        position: anchored ? "absolute" : "relative",
+        top: anchored ? MODAL_HEADER_INSET : undefined,
+        right: anchored ? MODAL_HEADER_INSET : undefined,
+        zIndex: anchored ? 5 : undefined,
+      }}
+    >
+      <X size={size} color={iconColor} />
+    </ModalHeaderIconButton>
+  );
+}
+function PanelHeader({ title, onClose, showClose = true }) {
+  return (
+    <div style={{ position: "relative", padding: `${MODAL_HEADER_INSET}px ${MODAL_HEADER_INSET}px 20px ${MODAL_HEADER_INSET}px` }}>
       <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 21, color: C.ink900 }}>{title}</span>
-      <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}><X size={16} color={C.ink900} /></button>
+      {showClose && <ModalCloseButton onClick={onClose} anchored />}
     </div>
   );
 }
-function PanelHeaderWithActions({ title, onClose, onDelete }) {
+function PanelHeaderWithActions({ title, onClose, onDelete, onEdit, editDisabled = false }) {
+  const actionBarWidth = MODAL_HEADER_ICON_SIZE * 3 + MODAL_HEADER_ICON_GAP * 2;
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "24px 24px 20px 24px" }}>
-      <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 21, color: C.ink900 }}>{title}</span>
-      <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-        <button onClick={onDelete} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}><Trash2 size={17} color={C.ink500} /></button>
-        <button disabled title="수정 기능은 준비 중이에요" style={{ background: "none", border: "none", cursor: "default", padding: 0, opacity: 0.4 }}><Pencil size={17} color={C.ink500} /></button>
-        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}><X size={16} color={C.ink500} /></button>
+    <div style={{ position: "relative", padding: `${MODAL_HEADER_INSET}px ${MODAL_HEADER_INSET}px 20px ${MODAL_HEADER_INSET}px` }}>
+      <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 21, color: C.ink900, display: "block", paddingRight: actionBarWidth }}>{title}</span>
+      <div style={{ position: "absolute", top: MODAL_HEADER_INSET, right: MODAL_HEADER_INSET, display: "flex", alignItems: "center", gap: MODAL_HEADER_ICON_GAP, height: MODAL_HEADER_ICON_SIZE }}>
+        <ModalHeaderIconButton onClick={onDelete} ariaLabel="삭제">
+          <Trash2 size={MODAL_HEADER_ICON_SIZE} color={C.ink500} />
+        </ModalHeaderIconButton>
+        {onEdit ? (
+          <ModalHeaderIconButton onClick={onEdit} disabled={editDisabled} ariaLabel="수정">
+            <Pencil size={MODAL_HEADER_ICON_SIZE} color={C.ink500} />
+          </ModalHeaderIconButton>
+        ) : (
+          <ModalHeaderIconButton disabled title="수정 기능은 준비 중이에요" ariaLabel="수정">
+            <Pencil size={MODAL_HEADER_ICON_SIZE} color={C.ink500} />
+          </ModalHeaderIconButton>
+        )}
+        <ModalHeaderIconButton onClick={onClose} ariaLabel="닫기">
+          <X size={MODAL_HEADER_ICON_SIZE} color={C.ink600} />
+        </ModalHeaderIconButton>
+      </div>
+    </div>
+  );
+}
+
+function UnderlineEventButton({ children, onClick }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        background: "none",
+        border: "none",
+        color: hover ? C.ink500 : C.ink900,
+        fontFamily: FONT,
+        fontWeight: 400,
+        fontSize: 15,
+        lineHeight: "20px",
+        textDecoration: "underline",
+        textUnderlineOffset: 2,
+        cursor: "pointer",
+        padding: 0,
+        margin: 0,
+        transition: "color 0.15s ease",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ReferenceCheckpointRow({ checkpoint }) {
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+      <span
+        style={{
+          width: 16,
+          height: REFERENCE_CHECKPOINT_ROW_HEIGHT,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <CheckpointDot size={16} color={C.ink500} />
+      </span>
+      <div style={{ fontFamily: FONT, fontSize: 15, color: C.ink900, lineHeight: `${REFERENCE_CHECKPOINT_ROW_HEIGHT}px` }}>
+        <span style={{ fontWeight: 500 }}>{checkpoint.title}</span>
+        {checkpoint.description ? (
+          <span style={{ fontWeight: 400, marginLeft: 6, color: C.ink800 }}>{checkpoint.description}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CoordinationCheckpointRow({ checkpoint, onOpenBlockingEvent }) {
+  const eventTitle = checkpoint.blockingEventTitle;
+  const eventLabel = eventTitle && checkpoint.blockingEventAttendeeCount != null
+    ? `${eventTitle} (${checkpoint.blockingEventAttendeeCount}명)`
+    : eventTitle;
+  const canOpen = eventLabel && onOpenBlockingEvent;
+
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+      <ExclamationCircle size={16} color={C.ink500} style={{ flexShrink: 0, marginTop: 2 }} />
+      <div style={{ fontFamily: FONT, fontSize: 15, color: C.ink900, lineHeight: "20px" }}>
+        {canOpen ? (
+          <>
+            {checkpoint.actorLabel ? `${checkpoint.actorLabel} ` : null}
+            <UnderlineEventButton onClick={() => onOpenBlockingEvent(checkpoint)}>
+              {eventLabel}
+            </UnderlineEventButton>
+            {checkpoint.description}
+          </>
+        ) : (
+          <>
+            {checkpoint.actorLabel ? `${checkpoint.actorLabel} ` : null}
+            <span>{checkpoint.title}</span>
+            {checkpoint.description && (
+              <span style={{ display: "block", fontSize: 13, color: C.ink600, marginTop: 4, lineHeight: "18px" }}>
+                {checkpoint.description}
+              </span>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
@@ -957,9 +2150,25 @@ function PanelHeaderWithActions({ title, onClose, onDelete }) {
 
 /* ---------- (QuickAddModal was merged into the unified CreationWizard) ---------- */
 
-function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelete }) {
+function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelete, allowReschedule, onReschedule, coordinationDraft, onCopySuggestion, overlayZIndex = 50 }) {
   const start = toDate(ev.start);
   const end = toDate(ev.end);
+  const isOwnEvent = personId === ME_ID;
+  const canEditSchedule = isOwnEvent && (allowReschedule || ev.movable || ev.type === "focus");
+  const [editing, setEditing] = useState(isOwnEvent && Boolean(allowReschedule));
+  const showOwnRescheduleGuide = isOwnEvent && allowReschedule && !editing;
+  const [dateStr, setDateStr] = useState(() => dateOnlyStr(start));
+  const [startTime, setStartTime] = useState(hourToTimeStr(start.getHours() + start.getMinutes() / 60));
+  const [endTime, setEndTime] = useState(hourToTimeStr(end.getHours() + end.getMinutes() / 60));
+
+  const saveReschedule = () => {
+    if (!onReschedule) return;
+    const nextStartDate = toDate(`${dateStr}T${startTime}:00`);
+    const nextEndDate = toDate(`${dateStr}T${endTime}:00`);
+    if (nextEndDate <= nextStartDate) return;
+    onReschedule({ start: toLocalISO(nextStartDate), end: toLocalISO(nextEndDate) });
+  };
+
   const attendeeIds = useMemo(() => {
     if (ev.meetingMeta) {
       return [
@@ -978,16 +2187,72 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
   const room = ev.room ?? ev.meetingMeta?.room;
   const showRoom = ev.type === "meeting" || !!room;
 
+  const copyCoordinationDraft = async () => {
+    if (!coordinationDraft) return;
+    try {
+      await navigator.clipboard.writeText(coordinationDraft);
+      onCopySuggestion?.();
+    } catch {
+      onCopySuggestion?.();
+    }
+  };
+
   return (
-    <Overlay onClose={onClose}>
-      <PanelHeaderWithActions title={ev.title} onClose={onClose} onDelete={onDelete} />
+    <Overlay onClose={onClose} zIndex={overlayZIndex}>
+      {isOwnEvent ? (
+        <PanelHeaderWithActions
+          title={ev.title}
+          onClose={onClose}
+          onDelete={onDelete}
+          onEdit={canEditSchedule ? () => setEditing((v) => !v) : undefined}
+        />
+      ) : (
+        <PanelHeader title={ev.title} onClose={onClose} />
+      )}
       <div style={{ padding: "0 24px 24px 24px", display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 15, color: C.ink900 }}>
-          <CalendarCheck2 size={16} color={C.ink500} /> {fmtDate(start)}
-        </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 15, color: C.ink900 }}>
-          <Clock size={16} color={C.ink500} /> {fmtAmPm(start)} - {fmtAmPm(end)}
-        </div>
+        {!editing ? (
+          <>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 15, color: C.ink900 }}>
+              <CalendarCheck2 size={16} color={C.ink500} /> {fmtDate(start)}
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 15, color: C.ink900 }}>
+              <Clock size={16} color={C.ink500} /> {fmtAmPmRange(start, end, " - ")}
+            </div>
+          </>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 6, fontFamily: FONT, fontSize: 14, color: C.ink600 }}>
+              날짜
+              <input
+                type="date"
+                value={dateStr}
+                onChange={(e) => setDateStr(e.target.value)}
+                style={{ height: 40, border: `1px solid ${C.border}`, borderRadius: 10, padding: "0 12px", fontFamily: FONT, fontSize: 15, color: C.ink900 }}
+              />
+            </label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontFamily: FONT, fontSize: 14, color: C.ink600 }}>
+                시작
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  style={{ height: 40, border: `1px solid ${C.border}`, borderRadius: 10, padding: "0 12px", fontFamily: FONT, fontSize: 15, color: C.ink900 }}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontFamily: FONT, fontSize: 14, color: C.ink600 }}>
+                종료
+                <input
+                  type="time"
+                  value={endTime}
+                  min={startTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  style={{ height: 40, border: `1px solid ${C.border}`, borderRadius: 10, padding: "0 12px", fontFamily: FONT, fontSize: 15, color: C.ink900 }}
+                />
+              </label>
+            </div>
+          </div>
+        )}
         {showRoom && (
           <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 15, color: C.ink900 }}>
             <MapPin size={16} color={C.ink500} />
@@ -996,8 +2261,14 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
         )}
       </div>
 
-      {attendeePeople.length > 0 && (
-        <div style={{ padding: "20px 24px 40px", borderTop: `1px solid ${C.bg2}` }}>
+      {editing && canEditSchedule && (
+        <div style={{ padding: "0 24px 24px", borderTop: `1px solid ${C.bg2}` }}>
+          <PrimaryButton compact onClick={saveReschedule} style={{ width: "100%" }}>일정 저장</PrimaryButton>
+        </div>
+      )}
+
+      {attendeePeople.length > 0 && !editing && (
+        <div style={{ padding: coordinationDraft || showOwnRescheduleGuide ? "20px 24px 0" : "20px 24px 48px" }}>
           <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, marginBottom: 16 }}>참석자</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px 16px" }}>
             {attendeePeople.map((p) => (
@@ -1014,6 +2285,71 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
           </div>
         </div>
       )}
+
+      {coordinationDraft && !editing && (
+        <div style={{ padding: "32px 24px 48px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.ink900 }}>이렇게 보내보세요</div>
+            <button
+              type="button"
+              aria-label="메시지 복사"
+              onClick={copyCoordinationDraft}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                margin: 0,
+                cursor: "pointer",
+                flexShrink: 0,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                fontFamily: FONT,
+                fontSize: 13,
+                fontWeight: 500,
+                color: C.ink600,
+                lineHeight: "18px",
+              }}
+            >
+              <Copy size={12} />
+              복사
+            </button>
+          </div>
+          <div
+            style={{
+              marginTop: 10,
+              borderRadius: 10,
+              background: C.gray100,
+              padding: "12px 14px",
+            }}
+          >
+            <div style={{ fontFamily: FONT, fontSize: 13, lineHeight: "20px", color: C.ink900, wordBreak: "keep-all" }}>
+              {coordinationDraft}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOwnRescheduleGuide && (
+        <div style={{ padding: "32px 24px 48px" }}>
+          <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.ink900 }}>일정을 옮겨 보세요</div>
+          <div
+            style={{
+              marginTop: 10,
+              borderRadius: 10,
+              background: C.gray100,
+              padding: "12px 14px",
+            }}
+          >
+            <div style={{ fontFamily: FONT, fontSize: 13, lineHeight: "20px", color: C.ink900, wordBreak: "keep-all" }}>
+              겹치는 일정을 다른 시간으로 옮기면 추천 후보와 맞출 수 있어요.
+            </div>
+          </div>
+          <PrimaryButton compact onClick={() => setEditing(true)} style={{ marginTop: 16, width: "100%" }}>
+            일정 변경
+          </PrimaryButton>
+        </div>
+      )}
     </Overlay>
   );
 }
@@ -1023,7 +2359,7 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
 const roomLabel = (r) => `${r.tower} ${r.name}`;
 
 function formatScheduleLabel(dateStr, startHour, durationMinutes, endHour) {
-  const d = toDate((dateStr || DEMO_TODAY_STR) + "T00:00:00");
+  const d = toDate((dateStr || getDemoTodayStr()) + "T00:00:00");
   if (startHour == null || endHour == null || durationMinutes === "custom") {
     return `${d.getMonth() + 1}월 ${d.getDate()}일 · 시간 선택`;
   }
@@ -1035,21 +2371,88 @@ function formatScheduleLabel(dateStr, startHour, durationMinutes, endHour) {
   const endLabel = endPeriod === startPeriod ? `${eh}시` : `${endPeriod} ${eh}시`;
   return `${d.getMonth() + 1}월 ${d.getDate()}일 ${startPeriod} ${sh}시~ ${endLabel}`;
 }
-const fieldButtonStyle = { height: 46, border: `1px solid ${C.border}`, borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, background: "none", cursor: "pointer", width: "100%", boxSizing: "border-box", fontFamily: FONT };
+const fieldButtonStyle = { height: 46, borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, background: C.white, cursor: "pointer", width: "100%", boxSizing: "border-box", fontFamily: FONT };
 
-function CreationWizard({ wizard, setWizard, people, jobs, events, companySettings, rooms, visibleIds, onClose, onConfirm, onQuickCreate }) {
+function wizardTitleInputStyle() {
+  return {
+    height: 46,
+    borderRadius: 10,
+    padding: "8px 12px",
+    fontFamily: FONT,
+    fontWeight: 500,
+    fontSize: 17,
+    outline: "none",
+    width: "100%",
+    boxSizing: "border-box",
+  };
+}
+
+function wizardDetailsRevealStyle(revealed) {
+  const sectionGap = 30;
+  return {
+    display: "flex",
+    flexDirection: "column",
+    gap: sectionGap,
+    marginTop: revealed ? sectionGap : 0,
+    overflow: "hidden",
+    maxHeight: revealed ? WIZARD_DETAILS_REVEAL_MAX : 0,
+    opacity: revealed ? 1 : 0,
+    transform: revealed ? "translateY(0)" : "translateY(16px)",
+    transition: WIZARD_DETAILS_REVEAL_TRANSITION,
+    pointerEvents: revealed ? "auto" : "none",
+  };
+}
+
+function FieldNavButton({ onClick, children }) {
+  return (
+    <button
+      type="button"
+      className="wizard-outline-control"
+      onClick={onClick}
+      style={fieldButtonStyle}
+    >
+      {children}
+    </button>
+  );
+}
+
+function applyWizardTitleChange(wizard, title, companySettings) {
+  const defaults = getOccasionScheduleDefaults(title, companySettings, wizard.durationMinutes);
+  const next = { ...wizard, title };
+  if (defaults.occasion !== "default") {
+    next.roomRequired = false;
+    next.forcedRoomId = null;
+    next.durationPreset = "custom";
+    if (defaults.startHour != null) next.startHour = defaults.startHour;
+    if (defaults.durationMinutes != null) {
+      next.durationMinutes = defaults.durationMinutes;
+      next.endHour = defaults.startHour + defaults.durationMinutes / 60;
+    }
+  }
+  return next;
+}
+
+function CreationWizard({ wizard, setWizard, people, jobs, events, companySettings, rooms, visibleIds, onClose, onConfirm, onQuickCreate, onOpenBlockingEvent }) {
   const [index, setIndex] = useState(0);
-  const [loadingStep, setLoadingStep] = useState(0);
+  const pinnedCandidateKeyRef = React.useRef(null);
+  const [frozenCandidates, setFrozenCandidates] = useState(null);
+  const [loadingStepIndex, setLoadingStepIndex] = useState(0);
+  const [loadingStepPhase, setLoadingStepPhase] = useState("working");
   const [loadingExiting, setLoadingExiting] = useState(false);
   const [headerRevealed, setHeaderRevealed] = useState(false);
   const [resultsEntering, setResultsEntering] = useState(false);
-  const [searchActiveIndex, setSearchActiveIndex] = useState(0);
+  const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
   const [selectedRoomByCandidate, setSelectedRoomByCandidate] = useState({});
   const [pagerHover, setPagerHover] = useState(null);
   const [hoveredAttendeeId, setHoveredAttendeeId] = useState(null);
+  const attendeeRowRefs = React.useRef(new Map());
+  const detailsRevealed = wizard.basePhase === "details";
   const attendeesSnapshotRef = React.useRef(null);
   const prevWizardStepRef = React.useRef(wizard.step);
   const revealStartedRef = React.useRef(false);
+  const titleInputRef = React.useRef(null);
+
+  const openAttendeesStep = () => setWizard({ ...wizard, step: "attendees", search: "" });
 
   React.useEffect(() => {
     if (wizard.step === "attendees" && prevWizardStepRef.current !== "attendees") {
@@ -1058,13 +2461,18 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
     prevWizardStepRef.current = wizard.step;
   }, [wizard.step, wizard.attendees]);
 
+  React.useEffect(() => {
+    if (wizard.step !== "quickBase" && wizard.step !== "base") return;
+    if (detailsRevealed) return;
+    const timer = window.setTimeout(() => titleInputRef.current?.focus(), 60);
+    return () => window.clearTimeout(timer);
+  }, [wizard.step, detailsRevealed]);
+
   const backFromAttendees = () => {
-    setWizard({
-      ...wizard,
-      step: wizard.origin === "toolbar" ? "quickBase" : "base",
+    setWizard(returnToBaseWizard(wizard, {
       attendees: attendeesSnapshotRef.current ? { ...attendeesSnapshotRef.current } : wizard.attendees,
       search: "",
-    });
+    }));
   };
 
   const requiredIds = Object.keys(wizard.attendees).filter((id) => wizard.attendees[id] === "required");
@@ -1075,12 +2483,25 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
     [companySettings],
   );
 
+  const resolvedDurationMinutes = wizard.durationMinutes === "custom" && wizard.startHour != null && wizard.endHour != null
+    ? Math.max(30, Math.round((wizard.endHour - wizard.startHour) * 60))
+    : wizard.durationMinutes;
+
+  const recommendationWeekDays = useMemo(
+    () => getRecommendationWeekDays(getDemoTodayStr(), WEEK_DAYS),
+    [],
+  );
+  const recommendationNotBefore = useMemo(
+    () => toDate(`${getDemoTodayStr()}T${hourToTimeStr(normalizedCompanySettings.commuteIn)}:00`),
+    [normalizedCompanySettings.commuteIn],
+  );
+
   const request = useMemo(
     () => buildRecommendationRequest({
       title: wizard.title,
       description: wizard.description,
-      durationMinutes: wizard.durationMinutes,
-      weekDays: WEEK_DAYS,
+      durationMinutes: resolvedDurationMinutes,
+      weekDays: recommendationWeekDays,
       companySettings: normalizedCompanySettings,
       roomRequired: wizard.roomRequired !== false,
       forcedRoomId: wizard.forcedRoomId,
@@ -1089,32 +2510,49 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
       people,
       organizerId: ME_ID,
     }),
-    [wizard.title, wizard.description, wizard.durationMinutes, wizard.roomRequired, wizard.forcedRoomId, requiredIds.join(","), optionalIds.join(","), normalizedCompanySettings, people],
+    [wizard.title, wizard.description, resolvedDurationMinutes, recommendationWeekDays, wizard.roomRequired, wizard.forcedRoomId, requiredIds.join(","), optionalIds.join(","), normalizedCompanySettings, people],
   );
 
   const inRecommendationFlow = wizard.step === "loading" || wizard.step === 3;
 
-  const candidates = useMemo(
-    () => (inRecommendationFlow
-      ? generateCandidates(request, people, events, normalizedCompanySettings, rooms, {
-        organizerId: ME_ID,
-        roomEvents: ROOM_EVENTS,
-        fallbackRooms: ROOMS_BASE,
-      })
-      : []),
-    [inRecommendationFlow, request, people, events, normalizedCompanySettings, rooms],
+  const candidateGenerationOptions = useMemo(() => ({
+    organizerId: ME_ID,
+    roomEvents: ROOM_EVENTS,
+    fallbackRooms: ROOMS_BASE,
+    notBefore: recommendationNotBefore,
+  }), [recommendationNotBefore]);
+
+  const buildCandidates = React.useCallback(
+    () => generateCandidates(request, people, events, normalizedCompanySettings, rooms, candidateGenerationOptions),
+    [request, people, events, normalizedCompanySettings, rooms, candidateGenerationOptions],
   );
+
+  React.useEffect(() => {
+    if (wizard.step !== "loading" && wizard.step !== 3) {
+      setFrozenCandidates(null);
+    }
+  }, [wizard.step]);
+
+  const candidates = useMemo(() => {
+    if (!inRecommendationFlow) return [];
+    return frozenCandidates ?? buildCandidates();
+  }, [inRecommendationFlow, frozenCandidates, buildCandidates]);
   const attendeeSearchResults = useMemo(() => {
     if (wizard.step !== "attendees") return [];
     return sortAttendeeSearchResults(people, wizard.search || "", visibleIds, [ME_ID], jobs);
   }, [wizard.step, wizard.search, people, visibleIds, jobs]);
   const current = candidates[Math.min(index, Math.max(0, candidates.length - 1))];
+  const handleOpenBlockingEvent = (checkpoint) => {
+    if (!onOpenBlockingEvent || !current) return;
+    pinnedCandidateKeyRef.current = `${current.start.getTime()}-${current.end.getTime()}`;
+    onOpenBlockingEvent(checkpoint, {
+      proposedTitle: wizard.title?.trim() || "새 일정",
+      proposedStart: current.start,
+      proposedEnd: current.end,
+    });
+  };
   const currentRequiredMet = current ? isRequiredAttendanceMet(current) : true;
   const currentSelectable = current ? isCandidateSelectable(current) : false;
-  const recommendationFlowSummary = useMemo(
-    () => buildRecommendationFlowSummary(candidates),
-    [candidates],
-  );
   const candidateCoordinationHint = current ? buildCandidateCoordinationHint(current) : null;
   const candidateCoordinationSection = current ? buildCandidateCoordinationSection(current) : null;
   const referenceCheckpoints = current ? getReferenceCheckpoints(current) : [];
@@ -1133,8 +2571,9 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
     return buildPositiveValidationReasons({
       ...getValidationReasonInput(current, currentWithRoom?.roomReason),
       pool: candidates,
+      occasion: current.occasion,
     });
-  }, [current, candidates, currentWithRoom?.roomReason]);
+  }, [current, candidates, currentWithRoom?.roomReason, current?.occasion]);
   const recommendationLayout = useMemo(() => {
     if (!candidates.length || !current) return null;
 
@@ -1142,18 +2581,15 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
       count <= 0 ? 0 : count * rowHeight + (count - 1) * gap
     );
     const reasonsBlockHeight = (c) => {
-      if (buildCandidateCoordinationSection(c)) return 0;
+      if (buildCandidateCoordinationSection(c) || c.tier !== 1) return 0;
       const reasonCount = buildPositiveValidationReasons({
         ...getValidationReasonInput(c),
         pool: candidates,
+        occasion: c.occasion,
       }).length;
       return blockHeight(REASON_ROW_HEIGHT, REASON_ROW_GAP, reasonCount);
     };
-    const checkpointBlockHeight = (c, checkpoints) => (
-      checkpoints.length > 0
-        ? CHECKPOINT_SECTION_HEADER + blockHeight(CHECKPOINT_ROW_HEIGHT, CHECKPOINT_ROW_GAP, checkpoints.length)
-        : 0
-    );
+    const checkpointBlockHeight = (checkpoints) => referenceCheckpointBlockHeight(checkpoints);
     const coordinationBlockHeight = (c) => {
       const section = buildCandidateCoordinationSection(c);
       if (!section) return 0;
@@ -1161,57 +2597,57 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
         COORDINATION_SECTION_MARGIN +
         COORDINATION_SECTION_HEADLINE_HEIGHT +
         COORDINATION_SECTION_GAP +
-        blockHeight(CHECKPOINT_ROW_HEIGHT, CHECKPOINT_ROW_GAP, section.checkpoints.length)
+        blockHeight(COORDINATION_CHECKPOINT_ROW_HEIGHT, CHECKPOINT_ROW_GAP, section.checkpoints.length)
       );
     };
 
-    const maxReasonsH = Math.max(...candidates.map(reasonsBlockHeight));
-    const maxCoordinationH = Math.max(...candidates.map(coordinationBlockHeight));
-    const maxReferenceCheckpointH = Math.max(
-      ...candidates.map((c) => checkpointBlockHeight(c, getReferenceCheckpoints(c))),
-    );
-    const showReferenceSection = maxReferenceCheckpointH > 0;
-    const showCoordinationSection = maxCoordinationH > 0;
-    const showReasonsSection = candidates.some((c) => !buildCandidateCoordinationSection(c));
-    const showRoomSection = candidates.some((c) => c.requiredRoom);
-    const currentReasonsH = reasonsBlockHeight(current);
-    const showCurrentReasons = !candidateCoordinationSection;
+    const getCandidateHeights = (c) => {
+      const coordinationH = coordinationBlockHeight(c);
+      const reasonsH = reasonsBlockHeight(c);
+      const referenceH = checkpointBlockHeight(getReferenceCheckpoints(c));
+      const hasCoordination = coordinationH > 0;
+      const hasReasons = !hasCoordination && reasonsH > 0;
+      const hasReference = referenceH > 0;
+      const bodyH =
+        coordinationH +
+        (hasReasons ? REASON_LIST_MARGIN_TOP + reasonsH : 0) +
+        (hasReference ? CHECKPOINT_SECTION_MARGIN + referenceH : 0);
+      const roomH = c.requiredRoom ? ROOM_SECTION_MARGIN + ROOM_PICKER_BLOCK_HEIGHT : 0;
+      const dateSectionH = getRecommendationDateSectionHeight(Boolean(buildCandidateCoordinationHint(c)));
+      return { bodyH, roomH, scrollBelowDateH: bodyH + roomH, dateSectionH };
+    };
 
-    const roomBlockHeight = ROOM_PICKER_BLOCK_HEIGHT;
+    const allHeights = candidates.map(getCandidateHeights);
+    const maxScrollBelowDateH = Math.max(...allHeights.map((h) => h.scrollBelowDateH));
+    const maxDateSectionH = Math.max(...allHeights.map((h) => h.dateSectionH));
 
-    const maxContentH =
-      (showCoordinationSection ? maxCoordinationH : 0) +
-      (showReasonsSection ? REASON_LIST_MARGIN_TOP + maxReasonsH : 0) +
-      (showReferenceSection ? CHECKPOINT_SECTION_MARGIN + maxReferenceCheckpointH : 0) +
-      (showRoomSection ? ROOM_SECTION_MARGIN + roomBlockHeight : 0);
-
+    const currentHeights = getCandidateHeights(current);
     const currentCoordinationH = coordinationBlockHeight(current);
-    const currentReferenceCheckpointH = checkpointBlockHeight(current, referenceCheckpoints);
-    const currentContentH =
-      currentCoordinationH +
-      (showCurrentReasons ? REASON_LIST_MARGIN_TOP + currentReasonsH : 0) +
-      (currentReferenceCheckpointH > 0 ? CHECKPOINT_SECTION_MARGIN + currentReferenceCheckpointH : 0) +
-      (showRoomSection && current.requiredRoom ? ROOM_SECTION_MARGIN + roomBlockHeight : 0);
+    const currentReasonsH = reasonsBlockHeight(current);
+    const currentReferenceCheckpointH = checkpointBlockHeight(getReferenceCheckpoints(current));
+    const hasCoordinationSection = currentCoordinationH > 0;
+    const hasReasonsSection = !hasCoordinationSection && currentReasonsH > 0;
+    const hasReferenceSection = currentReferenceCheckpointH > 0;
+
+    const fixedModalHeight =
+      RECOMMENDATION_TOP_BAR_HEIGHT +
+      maxDateSectionH +
+      maxScrollBelowDateH +
+      RECOMMENDATION_FOOTER_HEIGHT +
+      RECOMMENDATION_HEIGHT_BUFFER;
 
     return {
-      maxReasonsH,
-      maxCoordinationH,
-      maxReferenceCheckpointH,
-      showReferenceSection,
-      showCoordinationSection,
-      showReasonsSection,
-      showRoomSection,
-      bodyMinHeight: maxContentH,
-      modalHeight:
-        RECOMMENDATION_TOP_BAR_HEIGHT +
-        RECOMMENDATION_DATE_SECTION_HEIGHT +
-        maxContentH +
-        RECOMMENDATION_FOOTER_HEIGHT +
-        RECOMMENDATION_HEIGHT_BUFFER,
-      roomBottomPadding: maxContentH - currentContentH,
-      showRoomForCurrent: current.requiredRoom,
+      showReferenceSection: hasReferenceSection,
+      showCoordinationSection: hasCoordinationSection,
+      showReasonsSection: hasReasonsSection,
+      showRoomSection: Boolean(current.requiredRoom),
+      scrollBelowDateMinHeight: maxScrollBelowDateH,
+      scrollContentPad: maxScrollBelowDateH - currentHeights.scrollBelowDateH + (maxDateSectionH - currentHeights.dateSectionH),
+      dateSectionMinHeight: undefined,
+      dateSectionPad: 0,
+      modalHeight: fixedModalHeight,
     };
-  }, [candidates, current, index, referenceCheckpoints, candidateCoordinationSection]);
+  }, [candidates, current]);
   const addAttendee = (id) => setWizard((w) => ({ ...w, attendees: { ...w.attendees, [id]: "required" } }));
   const removeAttendee = (id) => setWizard((w) => { const next = { ...w.attendees }; delete next[id]; return { ...w, attendees: next }; });
   const toggleOptional = (id) => setWizard((w) => ({ ...w, attendees: { ...w.attendees, [id]: w.attendees[id] === "optional" ? "required" : "optional" } }));
@@ -1221,33 +2657,57 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
   }, [wizard.step]);
 
   React.useEffect(() => {
-    setSearchActiveIndex(0);
+    const hasSearchQuery = Boolean(wizard.search?.trim());
+    setSearchActiveIndex(
+      attendeeSearchResults.length > 0 && hasSearchQuery ? 0 : -1,
+    );
+    setHoveredAttendeeId(null);
   }, [wizard.search, visibleIds.join(","), attendeeSearchResults.length]);
+
+  const handleAttendeeSearchKeyDown = React.useCallback((e) => {
+    if (wizard.step !== "attendees" || attendeeSearchResults.length === 0) return;
+    const hasSearchQuery = Boolean(wizard.search?.trim());
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHoveredAttendeeId(null);
+      setSearchActiveIndex((i) => (i < 0 ? 0 : Math.min(attendeeSearchResults.length - 1, i + 1)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHoveredAttendeeId(null);
+      setSearchActiveIndex((i) => {
+        if (i <= 0) return hasSearchQuery ? 0 : -1;
+        return i - 1;
+      });
+    } else if (e.key === "Enter") {
+      if (searchActiveIndex < 0) return;
+      e.preventDefault();
+      const person = attendeeSearchResults[searchActiveIndex];
+      if (!person) return;
+      if (wizard.attendees[person.id]) removeAttendee(person.id);
+      else addAttendee(person.id);
+    }
+  }, [wizard.step, wizard.search, attendeeSearchResults, searchActiveIndex, wizard.attendees]);
+
+  React.useEffect(() => {
+    if (wizard.step !== "attendees" || searchActiveIndex < 0) return;
+    attendeeRowRefs.current.get(searchActiveIndex)?.scrollIntoView({ block: "nearest" });
+  }, [wizard.step, searchActiveIndex, attendeeSearchResults.length]);
 
   React.useEffect(() => {
     if (wizard.step !== "attendees") return;
     const handler = (e) => {
       if (attendeeSearchResults.length === 0) return;
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSearchActiveIndex((i) => Math.min(attendeeSearchResults.length - 1, i + 1));
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setSearchActiveIndex((i) => Math.max(0, i - 1));
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        const person = attendeeSearchResults[searchActiveIndex];
-        if (!person) return;
-        if (wizard.attendees[person.id]) removeAttendee(person.id);
-        else addAttendee(person.id);
-      }
+      if (document.activeElement?.tagName === "INPUT") return;
+      handleAttendeeSearchKeyDown(e);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [wizard.step, attendeeSearchResults, searchActiveIndex, wizard.attendees]);
+  }, [wizard.step, attendeeSearchResults.length, handleAttendeeSearchKeyDown]);
 
   const goToLoading = () => {
-    setLoadingStep(0);
+    setFrozenCandidates(buildCandidates());
+    setLoadingStepIndex(0);
+    setLoadingStepPhase("working");
     setIndex(0);
     setLoadingExiting(false);
     setHeaderRevealed(false);
@@ -1269,10 +2729,27 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
     wizard.step === "loading" ||
     wizard.step === 3 ||
     Boolean(wizard.returnToRecommendations);
+  const wizardExitConfirm = disableBackdropClose ? { onConfirm: onClose } : undefined;
+
+  React.useEffect(() => {
+    if (wizard.step !== 3 || !current) return;
+    pinnedCandidateKeyRef.current = `${current.start.getTime()}-${current.end.getTime()}`;
+  }, [wizard.step, current?.start?.getTime(), current?.end?.getTime()]);
+
+  React.useEffect(() => {
+    if (wizard.step !== 3 || !candidates.length || !pinnedCandidateKeyRef.current) return;
+    const pinnedIdx = candidates.findIndex(
+      (candidate) => `${candidate.start.getTime()}-${candidate.end.getTime()}` === pinnedCandidateKeyRef.current,
+    );
+    if (pinnedIdx >= 0) {
+      setIndex((prev) => (prev === pinnedIdx ? prev : pinnedIdx));
+    }
+  }, [candidates, wizard.step]);
 
   React.useEffect(() => {
     if (wizard.step !== "loading" && wizard.step !== 3) {
-      setLoadingStep(0);
+      setLoadingStepIndex(0);
+      setLoadingStepPhase("working");
       setLoadingExiting(false);
       setHeaderRevealed(false);
       setResultsEntering(false);
@@ -1282,10 +2759,23 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
 
   React.useEffect(() => {
     if (wizard.step !== "loading") return;
-    if (loadingStep < AI_LOADING_STEP_COUNT) {
-      const t = setTimeout(() => setLoadingStep((s) => s + 1), AI_STEP_DURATION_MS);
+    if (loadingStepIndex >= AI_LOADING_STEP_COUNT) return;
+
+    if (loadingStepPhase === "working") {
+      const t = setTimeout(() => setLoadingStepPhase("completed"), AI_STEP_ACTIVE_MS);
       return () => clearTimeout(t);
     }
+
+    const t = setTimeout(() => {
+      setLoadingStepIndex((i) => i + 1);
+      setLoadingStepPhase("working");
+    }, AI_STEP_DONE_HOLD_MS);
+    return () => clearTimeout(t);
+  }, [wizard.step, loadingStepIndex, loadingStepPhase]);
+
+  React.useEffect(() => {
+    if (wizard.step !== "loading") return;
+    if (loadingStepIndex < AI_LOADING_STEP_COUNT) return;
     if (revealStartedRef.current) return;
     revealStartedRef.current = true;
 
@@ -1301,10 +2791,25 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
       clearTimeout(tHeader);
       clearTimeout(tResults);
     };
-  }, [wizard.step, loadingStep]);
+  }, [wizard.step, loadingStepIndex, setWizard]);
 
   React.useEffect(() => {
-    if (wizard.step !== 3) return;
+    if (wizard.step !== "loading") return;
+    if (loadingStepIndex < AI_LOADING_STEP_COUNT) return;
+    if (headerRevealed && resultsEntering) return;
+
+    const recovery = setTimeout(() => {
+      revealStartedRef.current = true;
+      setLoadingExiting(true);
+      setHeaderRevealed(true);
+      setResultsEntering(true);
+      setWizard((w) => (w.step === "loading" ? { ...w, step: 3 } : w));
+    }, AI_RESULTS_DELAY_MS + RECOMMEND_EXIT_MS + RECOMMEND_HEADER_MORPH_MS + 320);
+
+    return () => clearTimeout(recovery);
+  }, [wizard.step, loadingStepIndex, headerRevealed, resultsEntering, setWizard]);
+
+  React.useEffect(() => {
     const handler = (e) => {
       if (!resultsEntering) return;
       if (e.key === "ArrowLeft") setIndex((i) => Math.max(0, i - 1));
@@ -1316,192 +2821,224 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
 
   const scheduleLabel = formatScheduleLabel(wizard.dateStr, wizard.startHour, wizard.durationMinutes, wizard.endHour);
   const attendeeCountAll = Object.keys(wizard.attendees).length;
-  const selectedRoom = rooms.find((r) => r.id === wizard.forcedRoomId);
 
   const handleNext = () => {
+    if (wizard.returnToRecommendations) {
+      backToRecommendations();
+      return;
+    }
     if (attendeeCountAll > 1) {
       goToLoading();
     } else {
-      onQuickCreate(wizard.title, wizard.dateStr, wizard.startHour, wizard.durationMinutes, [ME_ID], wizard.forcedRoomId);
+      const defaults = getOccasionScheduleDefaults(wizard.title, normalizedCompanySettings, wizard.durationMinutes);
+      onQuickCreate(
+        wizard.title,
+        wizard.dateStr,
+        defaults.startHour ?? wizard.startHour,
+        defaults.durationMinutes ?? resolvedDurationMinutes,
+        [ME_ID],
+        defaults.occasion !== "default" || wizard.roomRequired === false ? null : wizard.forcedRoomId,
+      );
     }
+  };
+
+  const handleBasePrimaryNext = () => {
+    if (!wizard.title.trim()) return;
+    if (wizard.basePhase !== "details") {
+      setWizard({ ...wizard, basePhase: "details" });
+      return;
+    }
+    handleNext();
+  };
+
+  const handleBaseFormSubmit = (e) => {
+    e.preventDefault();
+    if (e.nativeEvent?.isComposing) return;
+    handleBasePrimaryNext();
+  };
+
+  const preventEnterDuringComposition = (e) => {
+    if (e.key === "Enter" && e.nativeEvent?.isComposing) e.preventDefault();
   };
 
   if (wizard.step === "quickBase") {
     const selectedPeople = people.filter((p) => wizard.attendees[p.id]);
     const roomRequired = wizard.roomRequired !== false;
     return (
-      <Overlay onClose={onClose} width={MODAL_WIDTH} disableBackdropClose={disableBackdropClose}>
-        <PanelHeader title="어떤 일정을 추가할까요?" onClose={onClose} />
-        <div style={{ padding: "10px 24px", display: "flex", flexDirection: "column", gap: 30 }}>
-          <Field label="제목">
-            <input autoFocus className="wizard-title-input" placeholder="일정 이름을 입력해 주세요." value={wizard.title} onChange={(e) => setWizard({ ...wizard, title: e.target.value })}
-              style={{ height: 46, border: `1px solid ${wizard.title ? C.blue : C.border}`, borderRadius: 10, padding: "8px 12px", fontFamily: FONT, fontWeight: 500, fontSize: 17, outline: "none", width: "100%", boxSizing: "border-box" }} />
-          </Field>
-          <Field label="참석자">
-            <button onClick={() => setWizard({ ...wizard, step: "attendees" })} style={fieldButtonStyle}>
-              <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: C.ink500, flex: 1, textAlign: "left" }}>참석자 찾기</span>
-              <Search size={18} color={C.ink500} />
-            </button>
-            {selectedPeople.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 16 }}>
-                {selectedPeople.map((p) => (
-                  <WizardAttendeeRow
-                    key={p.id}
-                    person={p}
-                    jobs={jobs}
-                    isOptional={wizard.attendees[p.id] === "optional"}
-                    onToggleOptional={() => toggleOptional(p.id)}
-                    onRemove={() => removeAttendee(p.id)}
-                  />
-                ))}
-              </div>
+      <Overlay onClose={onClose} width={MODAL_WIDTH} disableBackdropClose={disableBackdropClose} exitConfirm={wizardExitConfirm}>
+        <form onSubmit={handleBaseFormSubmit} style={{ display: "flex", flexDirection: "column" }}>
+          <PanelHeader title={wizard.returnToRecommendations ? "조건 수정" : "어떤 일정을 추가할까요?"} onClose={onClose} showClose={!wizard.returnToRecommendations} />
+          <div style={{ padding: "10px 24px" }}>
+            <Field label="제목">
+              <input
+                ref={titleInputRef}
+                className="wizard-title-input"
+                placeholder="일정 이름을 입력해 주세요."
+                value={wizard.title}
+                onChange={(e) => setWizard(applyWizardTitleChange(wizard, e.target.value, normalizedCompanySettings))}
+                onKeyDown={preventEnterDuringComposition}
+                style={wizardTitleInputStyle()}
+              />
+            </Field>
+            <div style={wizardDetailsRevealStyle(detailsRevealed)}>
+              {detailsRevealed && (
+                <>
+              <Field label="참석자">
+                <FieldNavButton onClick={openAttendeesStep}>
+                  <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: C.ink500, flex: 1, textAlign: "left" }}>참석자 찾기</span>
+                  <Search size={18} color={C.ink500} />
+                </FieldNavButton>
+                {selectedPeople.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 20 }}>
+                    {selectedPeople.map((p) => (
+                      <WizardAttendeeRow
+                        key={p.id}
+                        person={p}
+                        jobs={jobs}
+                        isOptional={wizard.attendees[p.id] === "optional"}
+                        onToggleOptional={() => toggleOptional(p.id)}
+                        onRemove={() => removeAttendee(p.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </Field>
+              <Field label="시간">
+                <WizardDurationToggle
+                  dateStr={wizard.dateStr}
+                  startHour={wizard.startHour}
+                  endHour={wizard.endHour}
+                  durationMinutes={wizard.durationMinutes}
+                  durationPreset={wizard.durationPreset ?? inferDurationPreset(wizard.durationMinutes)}
+                  onSelectPreset={(minutes) => {
+                    const startHour = wizard.startHour ?? 10;
+                    setWizard({
+                      ...wizard,
+                      durationPreset: minutes,
+                      durationMinutes: minutes,
+                      startHour,
+                      endHour: startHour + minutes / 60,
+                    });
+                  }}
+                  onOpenCustom={() => setWizard({
+                    ...wizard,
+                    startHour: wizard.durationPreset === "custom" ? wizard.startHour : null,
+                    endHour: wizard.durationPreset === "custom" ? wizard.endHour : null,
+                    dateStr: wizard.dateStr || getDemoTodayStr(),
+                    durationMinutes: "custom",
+                    durationPreset: "custom",
+                    step: "datetime",
+                  })}
+                  onClearCustom={() => {
+                    const startHour = wizard.startHour ?? 10;
+                    setWizard({
+                      ...wizard,
+                      durationPreset: 60,
+                      durationMinutes: 60,
+                      startHour,
+                      endHour: startHour + 1,
+                    });
+                  }}
+                />
+              </Field>
+              <Field label="회의실">
+                <Toggle options={[["필요", true], ["필요없음", false]]} value={roomRequired} onChange={(v) => setWizard({ ...wizard, roomRequired: v, forcedRoomId: v ? wizard.forcedRoomId : null })} />
+              </Field>
+                </>
+              )}
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "20px 24px 24px", flexShrink: 0 }}>
+            {wizard.returnToRecommendations && detailsRevealed && (
+              <SecondaryButton compact onClick={backToRecommendations}>취소</SecondaryButton>
             )}
-          </Field>
-          <Field label="시간">
-            <Toggle options={[["1시간", 60], ["30분", 30], ["직접 선택", "custom"]]} value={wizard.durationMinutes} onChange={(v) => v === "custom" ? setWizard({ ...wizard, startHour: null, endHour: null, dateStr: DEMO_TODAY_STR, durationMinutes: "custom", step: "datetime" }) : setWizard({ ...wizard, durationMinutes: v, endHour: wizard.startHour + v / 60 })} />
-          </Field>
-          <Field label="회의실">
-            <Toggle options={[["필요", true], ["필요없음", false]]} value={roomRequired} onChange={(v) => setWizard({ ...wizard, roomRequired: v, forcedRoomId: v ? wizard.forcedRoomId : null })} />
-          </Field>
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "20px 24px 24px", marginTop: "auto" }}>
-          {wizard.returnToRecommendations && (
-            <SecondaryButton onClick={backToRecommendations}>이전</SecondaryButton>
-          )}
-          <PrimaryButton disabled={!wizard.title.trim()} onClick={handleNext}>다음</PrimaryButton>
-        </div>
+            <PrimaryButton compact type="submit" disabled={!wizard.title.trim()}>
+              {wizard.returnToRecommendations && detailsRevealed ? "적용" : "다음"}
+            </PrimaryButton>
+          </div>
+        </form>
       </Overlay>
     );
   }
 
   if (wizard.step === "base") {
+    const roomRequired = wizard.roomRequired !== false;
     return (
-      <Overlay onClose={onClose} disableBackdropClose={disableBackdropClose}>
-        <PanelHeader title="어떤 일정을 추가할까요?" onClose={onClose} />
-        <div style={{ padding: "10px 24px", display: "flex", flexDirection: "column", gap: 32 }}>
-          <Field label="제목">
-            <input autoFocus className="wizard-title-input" placeholder="일정 이름을 입력해 주세요." value={wizard.title} onChange={(e) => setWizard({ ...wizard, title: e.target.value })}
-              style={{ height: 46, border: `1px solid ${wizard.title ? C.blue : C.border}`, borderRadius: 10, padding: "8px 12px", fontFamily: FONT, fontWeight: 500, fontSize: 17, outline: "none", width: "100%", boxSizing: "border-box" }} />
-          </Field>
-
-          <Field label="일정">
-            <button onClick={() => setWizard({ ...wizard, step: "datetime" })} style={fieldButtonStyle}>
-              <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: C.black, flex: 1, textAlign: "left" }}>{scheduleLabel}</span>
-              <Search size={18} color={C.ink500} />
-            </button>
-          </Field>
-
-          <Field label="참석자">
-            <button onClick={() => setWizard({ ...wizard, step: "attendees" })} style={fieldButtonStyle}>
-              <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: C.ink500, flex: 1, textAlign: "left" }}>
-                참석자 찾기
-              </span>
-              <Search size={18} color={C.ink500} />
-            </button>
-            {people.filter((p) => wizard.attendees[p.id]).length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 16 }}>
-                {people.filter((p) => wizard.attendees[p.id]).map((p) => (
-                  <WizardAttendeeRow
-                    key={p.id}
-                    person={p}
-                    jobs={jobs}
-                    isOptional={wizard.attendees[p.id] === "optional"}
-                    onToggleOptional={() => toggleOptional(p.id)}
-                    onRemove={() => removeAttendee(p.id)}
-                  />
-                ))}
-              </div>
+      <Overlay onClose={onClose} disableBackdropClose={disableBackdropClose} exitConfirm={wizardExitConfirm}>
+        <form onSubmit={handleBaseFormSubmit} style={{ display: "flex", flexDirection: "column" }}>
+          <PanelHeader title={wizard.returnToRecommendations ? "조건 수정" : "어떤 일정을 추가할까요?"} onClose={onClose} showClose={!wizard.returnToRecommendations} />
+          <div style={{ padding: "10px 24px" }}>
+            <Field label="제목">
+              <input
+                ref={titleInputRef}
+                className="wizard-title-input"
+                placeholder="일정 이름을 입력해 주세요."
+                value={wizard.title}
+                onChange={(e) => setWizard(applyWizardTitleChange(wizard, e.target.value, normalizedCompanySettings))}
+                onKeyDown={preventEnterDuringComposition}
+                style={wizardTitleInputStyle()}
+              />
+            </Field>
+            <div style={wizardDetailsRevealStyle(detailsRevealed)}>
+              {detailsRevealed && (
+                <>
+              <Field label="일정">
+                <button type="button" className="wizard-outline-control" onClick={() => setWizard({ ...wizard, step: "datetime" })} style={fieldButtonStyle}>
+                  <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: C.black, flex: 1, textAlign: "left" }}>{scheduleLabel}</span>
+                  <Search size={18} color={C.ink500} />
+                </button>
+              </Field>
+              <Field label="참석자">
+                <FieldNavButton onClick={openAttendeesStep}>
+                  <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: C.ink500, flex: 1, textAlign: "left" }}>
+                    참석자 찾기
+                  </span>
+                  <Search size={18} color={C.ink500} />
+                </FieldNavButton>
+                {people.filter((p) => wizard.attendees[p.id]).length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 20 }}>
+                    {people.filter((p) => wizard.attendees[p.id]).map((p) => (
+                      <WizardAttendeeRow
+                        key={p.id}
+                        person={p}
+                        jobs={jobs}
+                        isOptional={wizard.attendees[p.id] === "optional"}
+                        onToggleOptional={() => toggleOptional(p.id)}
+                        onRemove={() => removeAttendee(p.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </Field>
+              <Field label="회의실">
+                <Toggle options={[["필요", true], ["필요없음", false]]} value={roomRequired} onChange={(v) => setWizard({ ...wizard, roomRequired: v, forcedRoomId: v ? wizard.forcedRoomId : null })} />
+              </Field>
+                </>
+              )}
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "20px 24px 24px", flexShrink: 0 }}>
+            {wizard.returnToRecommendations && detailsRevealed && (
+              <SecondaryButton compact onClick={backToRecommendations}>취소</SecondaryButton>
             )}
-          </Field>
-
-          <Field label="회의실">
-            <button onClick={() => setWizard({ ...wizard, step: "room" })} style={fieldButtonStyle}>
-              <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: selectedRoom ? C.black : C.ink500, flex: 1, textAlign: "left" }}>
-                {selectedRoom ? `${roomLabel(selectedRoom)} (${selectedRoom.capacity}인)` : "회의실 찾기"}
-              </span>
-              <Search size={18} color={C.ink500} />
-            </button>
-          </Field>
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "20px 24px 24px 24px", marginTop: "auto" }}>
-          {wizard.returnToRecommendations && (
-            <SecondaryButton onClick={backToRecommendations}>이전</SecondaryButton>
-          )}
-          <PrimaryButton disabled={!wizard.title.trim()} onClick={handleNext}>다음</PrimaryButton>
-        </div>
+            <PrimaryButton compact type="submit" disabled={!wizard.title.trim()}>
+              {wizard.returnToRecommendations && detailsRevealed ? "적용" : "다음"}
+            </PrimaryButton>
+          </div>
+        </form>
       </Overlay>
     );
   }
 
   if (wizard.step === "datetime") {
-    const hasStart = wizard.startHour != null;
-    const hasEnd = wizard.endHour != null;
-    const updateStart = (value) => {
-      if (!value) {
-        setWizard({ ...wizard, startHour: null, endHour: null, durationMinutes: "custom" });
-        return;
-      }
-      const nextStart = timeStrToHour(value);
-      const nextEnd = hasEnd ? Math.max(wizard.endHour, nextStart + 0.5) : null;
-      setWizard({
-        ...wizard,
-        startHour: nextStart,
-        endHour: nextEnd,
-        durationMinutes: nextEnd != null ? Math.round((nextEnd - nextStart) * 60) : "custom",
-      });
-    };
-    const updateEnd = (value) => {
-      if (!value) {
-        setWizard({ ...wizard, endHour: null, durationMinutes: "custom" });
-        return;
-      }
-      const nextEnd = timeStrToHour(value);
-      if (!hasStart) {
-        setWizard({ ...wizard, endHour: nextEnd, durationMinutes: "custom" });
-        return;
-      }
-      const safeEnd = Math.max(nextEnd, wizard.startHour + 0.5);
-      setWizard({ ...wizard, endHour: safeEnd, durationMinutes: Math.round((safeEnd - wizard.startHour) * 60) });
-    };
-    const inputWrap = { ...fieldButtonStyle, padding: "0 12px", cursor: "text", gap: 8 };
-    const inputInner = { border: "none", outline: "none", background: "transparent", color: C.black, fontFamily: FONT, fontWeight: 500, fontSize: 17, width: "100%", flex: 1, minWidth: 0 };
-    const timeFieldWrap = { position: "relative", flex: 1, minWidth: 0, display: "flex", alignItems: "center" };
-    const timePlaceholder = { position: "absolute", left: 0, color: C.ink500, fontFamily: FONT, fontWeight: 500, fontSize: 17, pointerEvents: "none" };
-    const datetimeReady = hasStart && hasEnd;
     return (
-      <Overlay onClose={onClose} disableBackdropClose={disableBackdropClose}>
-        <PanelHeader title="언제로 할까요?" onClose={onClose} />
-        <div style={{ padding: "10px 24px", display: "flex", flexDirection: "column", gap: 24 }}>
-          <Field label="날짜">
-            <div style={inputWrap}>
-              <CalendarCheck2 size={20} color={C.ink600} />
-              <input type="date" className="wizard-datetime-input" value={wizard.dateStr || DEMO_TODAY_STR} onChange={(e) => setWizard({ ...wizard, dateStr: e.target.value })} style={inputInner} />
-            </div>
-          </Field>
-          <Field label="시작 시간">
-            <div style={inputWrap}>
-              <Clock size={20} color={C.ink600} />
-              <div style={timeFieldWrap}>
-                {!hasStart && <span style={timePlaceholder}>시작 시간 선택</span>}
-                <input type="time" className="wizard-datetime-input" value={hasStart ? hourToTimeStr(wizard.startHour) : ""} onChange={(e) => updateStart(e.target.value)} style={{ ...inputInner, color: hasStart ? C.black : "transparent" }} />
-              </div>
-            </div>
-          </Field>
-          <Field label="종료 시간">
-            <div style={inputWrap}>
-              <Clock size={20} color={C.ink600} />
-              <div style={timeFieldWrap}>
-                {!hasEnd && <span style={timePlaceholder}>종료 시간 선택</span>}
-                <input type="time" className="wizard-datetime-input" value={hasEnd ? hourToTimeStr(wizard.endHour) : ""} min={hasStart ? hourToTimeStr(wizard.startHour + 0.5) : undefined} onChange={(e) => updateEnd(e.target.value)} style={{ ...inputInner, color: hasEnd ? C.black : "transparent" }} />
-              </div>
-            </div>
-          </Field>
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "20px 24px 24px 24px", marginTop: "auto" }}>
-          <SecondaryButton onClick={() => setWizard({ ...wizard, step: wizard.origin === "toolbar" ? "quickBase" : "base" })}>이전</SecondaryButton>
-          <PrimaryButton disabled={!datetimeReady} onClick={() => setWizard({ ...wizard, step: wizard.origin === "toolbar" ? "quickBase" : "base" })}>확인</PrimaryButton>
-        </div>
-      </Overlay>
+      <WizardDatetimeStep
+        wizard={wizard}
+        setWizard={setWizard}
+        onClose={onClose}
+        disableBackdropClose={disableBackdropClose}
+        exitConfirm={wizardExitConfirm}
+      />
     );
   }
 
@@ -1518,21 +3055,26 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
       if (wizard.attendees[id]) removeAttendee(id); else addAttendee(id);
     };
     return (
-      <Overlay onClose={onClose} minHeight={WIZARD_MODAL_MIN_HEIGHT} height={WIZARD_MODAL_MIN_HEIGHT} disableBackdropClose={disableBackdropClose}>
+      <Overlay onClose={onClose} minHeight={WIZARD_MODAL_MIN_HEIGHT} height={WIZARD_MODAL_MIN_HEIGHT} disableBackdropClose={disableBackdropClose} exitConfirm={wizardExitConfirm}>
         <PanelHeader title="참석자 추가" onClose={onClose} />
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <div style={{ padding: "10px 24px 0", display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
             <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>참석자</div>
-            <div style={{ height: 46, border: `1px solid ${C.blue}`, borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, boxSizing: "border-box" }}>
+            <div className="wizard-outline-control" style={{ height: 46, borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, boxSizing: "border-box", background: C.white }}>
               <Search size={18} color={C.ink500} />
-              <input autoFocus
-                placeholder="이름, 팀, 직무명으로 검색" value={wizard.search}
+              <input
+                autoFocus
+                className="wizard-search-input"
+                placeholder="이름, 팀, 직무명으로 검색"
+                value={wizard.search}
                 onChange={(e) => setWizard({ ...wizard, search: e.target.value })}
-                style={{ border: "none", outline: "none", fontFamily: FONT, fontWeight: 500, fontSize: 17, color: C.black, flex: 1, minWidth: 0 }} />
+                onKeyDown={handleAttendeeSearchKeyDown}
+                style={{ border: "none", outline: "none", fontFamily: FONT, fontWeight: 500, fontSize: 17, color: C.black, flex: 1, minWidth: 0 }}
+              />
             </div>
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "8px 24px 0" }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: selectedPeople.length > 0 ? "12px 24px 16px" : "12px 24px 0" }}>
             <div style={{ margin: "0 -8px", padding: "0 8px" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {attendeeSearchResults.map((p, rowIndex) => (
@@ -1541,12 +3083,15 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
                     person={p}
                     jobs={jobs}
                     isAdded={!!wizard.attendees[p.id]}
-                    isActive={rowIndex === searchActiveIndex}
+                    isActive={searchActiveIndex >= 0 && rowIndex === searchActiveIndex}
                     isHovered={hoveredAttendeeId === p.id}
-                    anyHovered={hoveredAttendeeId != null}
                     onHover={() => setHoveredAttendeeId(p.id)}
                     onLeave={() => setHoveredAttendeeId(null)}
                     onToggle={toggleAttendeeInSearch}
+                    innerRef={(el) => {
+                      if (el) attendeeRowRefs.current.set(rowIndex, el);
+                      else attendeeRowRefs.current.delete(rowIndex);
+                    }}
                   />
                 ))}
               </div>
@@ -1566,9 +3111,9 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
           </>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "20px 24px 24px", flexShrink: 0 }}>
-          <SecondaryButton onClick={backFromAttendees}>이전</SecondaryButton>
-          <PrimaryButton
-            onClick={() => setWizard({ ...wizard, step: wizard.origin === "toolbar" ? "quickBase" : "base" })}
+          <SecondaryButton compact onClick={backFromAttendees}>이전</SecondaryButton>
+          <PrimaryButton compact
+            onClick={() => setWizard(returnToBaseWizard(wizard, { search: "" }))}
             style={{ opacity: addedCount === 0 ? 0.3 : 1 }}
           >
             {addedCount === 0 ? "추가하기" : `${addedCount}명 추가`}
@@ -1580,27 +3125,26 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
 
   if (wizard.step === "room") {
     return (
-      <Overlay onClose={onClose} disableBackdropClose={disableBackdropClose}>
+      <Overlay onClose={onClose} disableBackdropClose={disableBackdropClose} exitConfirm={wizardExitConfirm}>
         <PanelHeader title="회의실을 선택해 주세요" onClose={onClose} />
-        <div style={{ padding: "10px 24px 24px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
-          {rooms.map((r) => {
-            const isSelected = wizard.forcedRoomId === r.id;
-            return (
-              <div key={r.id} onClick={() => setWizard({ ...wizard, forcedRoomId: isSelected ? null : r.id })}
-                style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: 8, borderRadius: 8, background: isSelected ? C.bg2 : "none" }}>
-                <MapPin size={18} color={C.ink600} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{roomLabel(r)}</div>
-                  <div style={{ fontFamily: FONT, fontSize: 13, color: C.ink500 }}>{r.capacity}인 수용</div>
-                </div>
-                {isSelected ? <CheckCircleFilled size={18} color={C.blue} /> : <Circle size={18} color={C.border} />}
-              </div>
-            );
-          })}
+        <div style={{ padding: "10px 24px 24px 24px" }}>
+          <div style={{ margin: "0 -8px", padding: "0 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+            {rooms.map((r) => (
+              <RoomListRow
+                key={r.id}
+                room={r}
+                isSelected={wizard.forcedRoomId === r.id}
+                isHovered={false}
+                onHover={() => {}}
+                onLeave={() => {}}
+                onSelect={(roomId) => setWizard({ ...wizard, forcedRoomId: wizard.forcedRoomId === roomId ? null : roomId })}
+              />
+            ))}
+          </div>
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "20px 24px 24px 24px", marginTop: "auto" }}>
-          <SecondaryButton onClick={() => setWizard({ ...wizard, step: "base" })}>이전</SecondaryButton>
-          <PrimaryButton onClick={() => setWizard({ ...wizard, step: "base" })}>선택</PrimaryButton>
+          <SecondaryButton compact onClick={() => setWizard(returnToBaseWizard(wizard, { step: "base" }))}>이전</SecondaryButton>
+          <PrimaryButton compact onClick={() => setWizard(returnToBaseWizard(wizard, { step: "base" }))}>선택</PrimaryButton>
         </div>
       </Overlay>
     );
@@ -1629,6 +3173,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
     const modalWidth = headerRevealed ? RECOMMEND_MODAL_WIDTH : MODAL_WIDTH;
 
     return (
+      <>
       <Overlay
         onClose={onClose}
         width={modalWidth}
@@ -1636,6 +3181,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
         height={modalHeight}
         animateSize={headerRevealed && !resultsEntering}
         disableBackdropClose={disableBackdropClose}
+        exitConfirm={wizardExitConfirm}
       >
         <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         {/* 로딩 헤더 → 제안 헤더 morph */}
@@ -1647,7 +3193,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
               transition: RECOMMEND_EXIT_TRANSITION,
               position: headerRevealed ? "absolute" : "relative",
               inset: 0,
-              pointerEvents: loadingExiting ? "none" : "auto",
+              pointerEvents: headerRevealed || loadingExiting ? "none" : "auto",
             }}
           >
             <PanelHeader title={wizard.title} onClose={onClose} />
@@ -1656,21 +3202,17 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
             style={{
               opacity: headerRevealed ? 1 : 0,
               transform: headerRevealed ? "translateY(0)" : "translateY(8px)",
-              transition: `opacity 0.4s ease 0.04s, transform 0.4s ${RECOMMEND_EXIT_EASE} 0.04s`,
+              transition: `opacity 0.34s ease 0.03s, transform 0.34s ${RECOMMEND_EXIT_EASE} 0.03s`,
               position: headerRevealed ? "relative" : "absolute",
               inset: 0,
               pointerEvents: headerRevealed ? "auto" : "none",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "24px 24px 20px 24px", borderBottom: `1px solid ${C.bg2}` }}>
-              <span style={{ fontFamily: FONT, fontSize: 15, color: C.ink600 }}>
+            <div style={{ position: "relative", padding: `${MODAL_HEADER_INSET}px ${MODAL_HEADER_INSET}px 20px ${MODAL_HEADER_INSET}px`, borderBottom: `1px solid ${C.bg2}`, zIndex: 2 }}>
+              <span style={{ fontFamily: FONT, fontSize: 15, color: C.ink600, display: "block", paddingRight: 8 }}>
                 {wizard.title} · {Object.keys(wizard.attendees).length}인
                 <span
-                  onClick={() => setWizard({
-                    ...wizard,
-                    step: wizard.origin === "toolbar" ? "quickBase" : "base",
-                    returnToRecommendations: true,
-                  })}
+                  onClick={() => setWizard(returnToBaseWizard(wizard, { returnToRecommendations: true }))}
                   style={{
                     marginLeft: 6,
                     textDecoration: "underline",
@@ -1681,7 +3223,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
                   조건 수정
                 </span>
               </span>
-              <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer" }}><X size={16} color={C.ink900} /></button>
+              <ModalCloseButton onClick={onClose} anchored />
             </div>
           </div>
         </div>
@@ -1701,7 +3243,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
             <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900, marginBottom: 20 }}>
               가능한 일정을 찾아볼게요
             </div>
-            <AiThinkingStepList loadingStep={loadingStep} Check={Check} Spinner={Spinner} />
+            <AiThinkingStepList loadingStepIndex={loadingStepIndex} loadingStepPhase={loadingStepPhase} Check={Check} Spinner={Spinner} />
           </div>
         </div>
 
@@ -1726,20 +3268,15 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
               </div>
             ) : current ? (
               <>
-                {recommendationFlowSummary && (
-                  <div style={{ padding: "0 24px", marginTop: SECTION_GAP, marginBottom: 4 }}>
-                    <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.ink900, lineHeight: "22px" }}>
-                      {recommendationFlowSummary.headline}
-                    </div>
-                    {recommendationFlowSummary.subline && (
-                      <div style={{ fontFamily: FONT, fontSize: 14, color: C.ink600, marginTop: 4, lineHeight: "20px" }}>
-                        {recommendationFlowSummary.subline}
-                      </div>
-                    )}
-                  </div>
-                )}
                 <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-                  <div style={{ padding: `${recommendationFlowSummary ? 16 : SECTION_GAP}px 24px 0`, display: "flex", flexDirection: "column" }}>
+                  <div
+                    style={{
+                      padding: `${SECTION_GAP}px 24px 0`,
+                      display: "flex",
+                      flexDirection: "column",
+                      boxSizing: "border-box",
+                    }}
+                  >
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: currentRequiredMet ? C.blue : C.ink900 }}>
                         {currentRequiredMet ? "확정 가능 일정" : "확인 필요 일정"}
@@ -1751,8 +3288,8 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
                       </div>
                     </div>
                     <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-                      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 21, color: C.black }}>{current.start.getMonth() + 1}월 {current.start.getDate()}일 {fmtAmPm(current.start)}~{fmtAmPm(current.end)}</div>
-                      <div style={{ fontFamily: FONT, fontSize: 13, color: C.ink800 }}>다음주 {WEEKDAY[current.start.getDay()]}요일</div>
+                      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 21, color: C.black }}>{current.start.getMonth() + 1}월 {current.start.getDate()}일 {fmtAmPmRange(current.start, current.end)}</div>
+                      <div style={{ fontFamily: FONT, fontSize: 13, color: C.ink800 }}>{formatRelativeWeekdayLabel(current.start, getDemoTodayStr())}</div>
                       {candidateCoordinationHint && (
                         <div style={{ fontFamily: FONT, fontSize: 14, color: C.ink600, lineHeight: "20px" }}>{candidateCoordinationHint}</div>
                       )}
@@ -1761,7 +3298,8 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
 
                   <div
                     style={{
-                      minHeight: recommendationLayout?.bodyMinHeight ?? 0,
+                      minHeight: recommendationLayout?.scrollBelowDateMinHeight ?? 0,
+                      paddingBottom: (recommendationLayout?.scrollContentPad ?? 0) + SECTION_GAP,
                       display: "flex",
                       flexDirection: "column",
                     }}
@@ -1773,19 +3311,17 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
                         </div>
                         <div style={{ marginTop: COORDINATION_SECTION_GAP, display: "flex", flexDirection: "column", gap: CHECKPOINT_ROW_GAP }}>
                           {candidateCoordinationSection.checkpoints.map((c, i) => (
-                            <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-                              <CheckpointDot size={16} color={C.ink500} style={{ flexShrink: 0, marginTop: 2 }} />
-                              <div>
-                                <div style={{ fontFamily: FONT, fontSize: 15, color: C.ink900, lineHeight: "20px" }}>{c.title}</div>
-                                <div style={{ fontFamily: FONT, fontSize: 13, color: C.ink600, marginTop: 4, lineHeight: "18px" }}>{c.description}</div>
-                              </div>
-                            </div>
+                            <CoordinationCheckpointRow
+                              key={i}
+                              checkpoint={c}
+                              onOpenBlockingEvent={handleOpenBlockingEvent}
+                            />
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {!candidateCoordinationSection && (
+                    {!candidateCoordinationSection && current?.tier === 1 && (
                       <div style={{ padding: "0 24px", marginTop: REASON_LIST_MARGIN_TOP, display: "flex", flexDirection: "column", gap: REASON_ROW_GAP }}>
                         {displayValidationReasons.map((r, i) => (
                           <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start", fontSize: 15, lineHeight: "20px", color: C.ink900 }}>
@@ -1797,39 +3333,33 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
 
                     {recommendationLayout?.showReferenceSection && referenceCheckpoints.length > 0 && (
                       <div style={{ padding: "0 24px", marginTop: CHECKPOINT_SECTION_MARGIN }}>
-                        <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
-                          <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 14, color: C.ink900 }}>
+                        <div style={{ marginBottom: 12 }}>
+                          <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.ink900, lineHeight: "20px" }}>
                             참고할 점
-                          </span>
+                          </div>
+                          <div style={{ fontFamily: FONT, fontSize: 13, color: C.ink500, marginTop: 4, lineHeight: "18px" }}>
+                            이 회의로 확정 시 챙겨드릴게요.
+                          </div>
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: CHECKPOINT_ROW_GAP }}>
                           {referenceCheckpoints.map((c, i) => (
-                            <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-                              <CheckpointDot size={16} color={C.ink500} style={{ flexShrink: 0, marginTop: 2 }} />
-                              <div>
-                                <div style={{ fontFamily: FONT, fontSize: 15, color: C.ink900, lineHeight: "20px" }}>{c.title}</div>
-                                <div style={{ fontFamily: FONT, fontSize: 13, color: C.ink600, marginTop: 4, lineHeight: "18px" }}>{c.description}</div>
-                              </div>
-                            </div>
+                            <ReferenceCheckpointRow key={i} checkpoint={c} />
                           ))}
                         </div>
                       </div>
                     )}
 
                     {recommendationLayout?.showRoomSection && (
-                      <div style={{ marginTop: ROOM_SECTION_MARGIN, paddingBottom: recommendationLayout.roomBottomPadding, position: "relative", zIndex: 2 }}>
-                        {recommendationLayout.showRoomForCurrent ? (
-                          <RoomPicker current={currentWithRoom} selectedRoomId={selectedRoomId} onSelectRoom={(roomId) => setSelectedRoomByCandidate((prev) => ({ ...prev, [currentKey]: roomId }))} />
-                        ) : (
-                          <div style={{ minHeight: ROOM_PICKER_BLOCK_HEIGHT }} />
-                        )}
+                      <div style={{ marginTop: ROOM_SECTION_MARGIN, position: "relative", zIndex: 2 }}>
+                        <RoomPicker current={currentWithRoom} selectedRoomId={selectedRoomId} onSelectRoom={(roomId) => setSelectedRoomByCandidate((prev) => ({ ...prev, [currentKey]: roomId }))} />
                       </div>
                     )}
+
                   </div>
                 </div>
 
                 <div style={{ display: "flex", justifyContent: "flex-end", padding: "20px 24px 24px", flexShrink: 0 }}>
-                  <PrimaryButton disabled={!currentSelectable} onClick={() => onConfirm(currentWithRoom, requiredIds, optionalIds, wizard.title)}>선택하기</PrimaryButton>
+                  <PrimaryButton compact disabled={!currentSelectable} onClick={() => onConfirm(currentWithRoom, requiredIds, optionalIds, wizard.title)}>선택하기</PrimaryButton>
                 </div>
               </>
             ) : null}
@@ -1837,6 +3367,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
         )}
         </div>
       </Overlay>
+      </>
     );
   }
 
@@ -1845,7 +3376,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
 
 function Spinner() {
   return (
-    <div style={{ width: 16, height: 16, borderRadius: "50%", border: `2px solid ${C.bg2}`, borderTopColor: C.blue, animation: "spin 0.8s linear infinite" }}>
+    <div style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid rgba(49, 130, 246, 0.18)", borderTopColor: C.blue, animation: "spin 0.8s linear infinite" }}>
       <style>{"@keyframes spin { to { transform: rotate(360deg); } }"}</style>
     </div>
   );
@@ -1863,6 +3394,7 @@ function Field({ label, children }) {
 function RoomPicker({ current, selectedRoomId, onSelectRoom }) {
   const [open, setOpen] = useState(false);
   const [hover, setHover] = useState(false);
+  const [hoveredRoomId, setHoveredRoomId] = useState(null);
   const rootRef = React.useRef(null);
   const room = current.availableRooms.find((r) => r.id === selectedRoomId) || current.selectedRoom;
 
@@ -1871,23 +3403,48 @@ function RoomPicker({ current, selectedRoomId, onSelectRoom }) {
     rootRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [open]);
 
+  React.useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event) => {
+      if (rootRef.current && !rootRef.current.contains(event.target)) {
+        setOpen(false);
+        setHoveredRoomId(null);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [open]);
+
   return (
-    <div ref={rootRef} style={{ padding: "0 24px", position: "relative", zIndex: open ? 40 : undefined }}>
-      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: C.ink900, marginBottom: 12 }}>회의실</div>
+    <div ref={rootRef} style={{ padding: "0 24px", zIndex: open ? 40 : undefined }}>
+      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.ink900, lineHeight: "20px", marginBottom: 10 }}>회의실</div>
       {room ? (
-        <>
+        <div style={{ position: "relative" }}>
           <button
             type="button"
             onClick={() => setOpen((value) => !value)}
             onMouseEnter={() => setHover(true)}
             onMouseLeave={() => setHover(false)}
-            style={{ width: "100%", border: `1px solid ${C.border}`, borderRadius: 10, padding: "14px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", background: hover ? C.bg2 : C.white, cursor: "pointer", textAlign: "left", fontFamily: FONT, transition: "background 0.15s ease" }}
+            style={{
+              width: "100%",
+              border: `1px solid ${hover ? C.blue : C.border}`,
+              borderRadius: 10,
+              padding: "14px 12px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              background: C.white,
+              cursor: "pointer",
+              textAlign: "left",
+              fontFamily: FONT,
+              transition: "border-color 0.15s ease",
+            }}
           >
             <div>
               <div style={{ fontFamily: FONT, fontSize: 15, color: C.black, lineHeight: "20px" }}>{roomLabel(room)} ({room.capacity}인)</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, color: C.ink600, fontSize: 13, flexShrink: 0 }}>
-              변경 <ChevronRight size={14} color={C.ink600} style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s ease" }} />
+              변경 <ChevronRight size={14} color={C.ink500} style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s ease" }} />
             </div>
           </button>
           {open && (
@@ -1898,36 +3455,36 @@ function RoomPicker({ current, selectedRoomId, onSelectRoom }) {
                 right: 0,
                 bottom: "calc(100% + 8px)",
                 border: `1px solid ${C.border}`,
-                borderRadius: 10,
+                borderRadius: 12,
                 overflow: "hidden",
                 background: C.white,
                 boxShadow: "0 8px 24px rgba(17,24,39,0.12)",
                 zIndex: 50,
+                padding: "8px",
               }}
             >
-              {current.availableRooms.map((candidateRoom) => {
-                const selected = candidateRoom.id === room.id;
-                return (
-                  <button
-                    type="button"
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {current.availableRooms.map((candidateRoom) => (
+                  <RoomListRow
                     key={candidateRoom.id}
-                    onClick={() => { onSelectRoom(candidateRoom.id); setOpen(false); }}
-                    style={{ width: "100%", border: "none", borderBottom: `1px solid ${C.bg2}`, padding: "12px", display: "flex", alignItems: "center", gap: 10, background: selected ? C.blue200 : C.white, cursor: "pointer", textAlign: "left", fontFamily: FONT }}
-                  >
-                    <MapPin size={18} color={selected ? C.blue : C.ink600} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 15, color: C.ink900 }}>{roomLabel(candidateRoom)}</div>
-                      <div style={{ fontSize: 12, color: C.ink500 }}>{candidateRoom.capacity}인 수용</div>
-                    </div>
-                    {selected && <CheckCircleFilled size={18} color={C.blue} />}
-                  </button>
-                );
-              })}
+                    room={candidateRoom}
+                    isSelected={candidateRoom.id === room.id}
+                    isHovered={hoveredRoomId === candidateRoom.id}
+                    onHover={() => setHoveredRoomId(candidateRoom.id)}
+                    onLeave={() => setHoveredRoomId(null)}
+                    onSelect={(roomId) => {
+                      onSelectRoom(roomId);
+                      setOpen(false);
+                      setHoveredRoomId(null);
+                    }}
+                  />
+                ))}
+              </div>
             </div>
           )}
-        </>
+        </div>
       ) : (
-        <div style={{ color: C.ink600, fontSize: 14, lineHeight: "20px" }}>
+        <div style={{ color: C.ink600, fontSize: 15, lineHeight: "20px" }}>
           예약 가능한 회의실이 없어요. 라운지에서 진행해 보거나, 다른 일자를 추천받아 보세요.
         </div>
       )}
@@ -1937,13 +3494,13 @@ function RoomPicker({ current, selectedRoomId, onSelectRoom }) {
 
 /* ---------- Confirmed detail (참석자 + 챙길 점) ---------- */
 
-function ConfirmedDetailModal({ data, people, onClose, onDelete, rsvp, setRsvp }) {
+function ConfirmedDetailModal({ personId, data, people, onClose, onDelete, onEdit, rsvp, setRsvp }) {
   const { meta, title, groupId } = data;
   const start = toDate(meta.start), end = toDate(meta.end);
   const [checks, setChecks] = useState({});
   const requiredPeople = (meta.requiredIds ?? []).map((id) => people.find((p) => p.id === id)).filter(Boolean);
   const optionalPeople = (meta.optionalIds ?? []).map((id) => people.find((p) => p.id === id)).filter(Boolean);
-  const checkpoints = meta.checkpoints ?? [];
+  const checkpoints = personId === ME_ID ? (meta.checkpoints ?? []) : [];
 
   const toggleCheck = (i) => setChecks((c) => ({ ...c, [i]: !c[i] }));
   const rsvpKey = (id) => `${groupId}:${id}`;
@@ -1956,24 +3513,25 @@ function ConfirmedDetailModal({ data, people, onClose, onDelete, rsvp, setRsvp }
 
   return (
     <Overlay onClose={onClose}>
-      <PanelHeaderWithActions title={title} onClose={onClose} onDelete={onDelete} />
+      {onDelete ? (
+        <PanelHeaderWithActions title={title} onClose={onClose} onDelete={onDelete} onEdit={onEdit} />
+      ) : (
+        <PanelHeader title={title} onClose={onClose} />
+      )}
       <div style={{ padding: "0 24px 24px 24px", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 15, color: C.ink900 }}>
-          <CalendarCheck2 size={16} color={C.ink500} /> {fmtDate(start)} 다음주 {WEEKDAY[start.getDay()]}요일
+          <CalendarCheck2 size={16} color={C.ink500} /> {fmtDate(start)} {formatRelativeWeekdayLabel(start, getDemoTodayStr())}
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 15, color: C.ink900 }}>
-          <Clock size={16} color={C.ink500} /> {fmtAmPm(start)} - {fmtAmPm(end)}
+          <Clock size={16} color={C.ink500} /> {fmtAmPmRange(start, end, " - ")}
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 15, color: C.ink900 }}>
           <MapPin size={16} color={C.ink500} />
           {meta.room ? `${roomLabel(meta.room)} (${meta.room.capacity}인)` : "회의실 없음"}
-          {meta.room && (
-            <span style={{ textDecoration: "underline", color: C.ink500, cursor: "pointer", marginLeft: 8 }}>변경</span>
-          )}
         </div>
       </div>
 
-      <div style={{ padding: "20px 24px", borderTop: `1px solid ${C.bg2}` }}>
+      <div style={{ padding: "20px 24px 48px" }}>
         <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, marginBottom: 16 }}>참석자</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px 16px" }}>
           {[...requiredPeople, ...optionalPeople].map((p) => {
@@ -2007,7 +3565,7 @@ function ConfirmedDetailModal({ data, people, onClose, onDelete, rsvp, setRsvp }
       </div>
 
       {checkpoints.length > 0 && (
-        <div style={{ padding: "20px 24px 40px", borderTop: `1px solid ${C.bg2}` }}>
+        <div style={{ padding: "20px 24px 48px" }}>
           <div style={{ marginBottom: 14 }}>
             <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15 }}>챙길 점 <span style={{ color: C.ink500, fontWeight: 400 }}>(나만 보임)</span></span>
           </div>

@@ -15,7 +15,7 @@ export function RoomsSection({ rooms, setRooms, towers, icons }) {
     ]);
 
   return (
-    <div style={cardStyle}>
+    <div style={{ ...cardStyle, marginBottom: 16 }}>
       <div style={sectionTitleStyle}>회의실</div>
       {rooms.map((room) => (
         <div

@@ -11,6 +11,8 @@ import { personFirstName } from "../mock/anonymizedNames";
 
 export type MeetingPurpose = "decision" | "ideation" | "discussion" | "share_followup";
 
+export type MeetingOccasion = "default" | "lunch" | "dinner";
+
 export type CandidateStatus = "ready" | "has_checkpoints" | "needs_coordination" | "not_recommended";
 
 export type CandidateProfileKey = "best" | "fastest" | "participation";
@@ -40,7 +42,14 @@ export interface Checkpoint {
   type: CheckpointType;
   title: string;
   description: string;
+  /** 조율 문장 주어 — 예: "정민님" */
+  actorLabel?: string;
   targetPersonId?: string;
+  /** 조율 대상 일정 — UI에서 회의명 링크로 표시 */
+  blockingEventId?: string;
+  blockingPersonId?: string;
+  blockingEventTitle?: string;
+  blockingEventAttendeeCount?: number;
 }
 
 export interface RecommendationRequest {
@@ -48,6 +57,7 @@ export interface RecommendationRequest {
   description: string;
   purpose: MeetingPurpose;
   purposeConfidence: number;
+  occasion: MeetingOccasion;
   durationMinutes: number;
   dateRangeStart: string;
   dateRangeEnd: string;
@@ -118,6 +128,7 @@ export interface SlotCandidate {
   start: Date;
   end: Date;
   status: CandidateStatus;
+  occasion: MeetingOccasion;
   personStatuses: Record<string, PersonSlotStatus>;
   requiredRoom: boolean;
   requiredIds: string[];
@@ -144,6 +155,7 @@ export interface GenerateCandidatesOptions {
   organizerId: string;
   roomEvents: Record<string, RoomBooking[]>;
   fallbackRooms: Room[];
+  notBefore?: Date;
 }
 
 export interface PurposeInferenceInput {
@@ -172,6 +184,7 @@ export const CANDIDATE_PROFILE_LABELS: Record<CandidateProfileKey, string> = {
 export const RECOMMENDATION_PHILOSOPHY = {
   maxCandidates: 3,
   maxCheckpoints: 8,
+  maxCoordinationBlockers: 3,
   slotStepHours: 0.5,
   adjacentBufferMinutes: 30,
   commuteBufferMinutes: 30,
@@ -280,6 +293,47 @@ export function inferMeetingPurpose(input: PurposeInferenceInput): PurposeInfere
   return { purpose: topPurpose, confidence };
 }
 
+/** 제목으로 점심·회식 등 비정형 일정 유형 추론 */
+export function inferMeetingOccasion(title: string): MeetingOccasion {
+  const text = title.trim();
+  if (!text) return "default";
+
+  if (text.includes("회식")) return "dinner";
+
+  if (/점약/.test(text)) return "lunch";
+  if (/~\s*점심|점심\s*~/.test(text)) return "lunch";
+  if (/런치|lunch/i.test(text)) return "lunch";
+  if (/점심/.test(text) && !/점심\s*(전|후|직후)/.test(text)) return "lunch";
+
+  return "default";
+}
+
+export function getOccasionScheduleDefaults(
+  title: string,
+  companySettings: CompanySettings,
+  durationMinutes: number,
+) {
+  const occasion = inferMeetingOccasion(title);
+  if (occasion === "lunch") {
+    const lunchDurationMin = Math.round((companySettings.lunchEnd - companySettings.lunchStart) * 60);
+    return {
+      occasion,
+      startHour: companySettings.lunchStart,
+      durationMinutes: Math.min(durationMinutes, lunchDurationMin),
+      roomRequired: false as const,
+    };
+  }
+  if (occasion === "dinner") {
+    return {
+      occasion,
+      startHour: companySettings.commuteOut,
+      durationMinutes,
+      roomRequired: false as const,
+    };
+  }
+  return { occasion };
+}
+
 export function buildRecommendationRequest(input: {
   title: string;
   description?: string;
@@ -303,17 +357,24 @@ export function buildRecommendationRequest(input: {
     organizerId: input.organizerId,
   });
   const cs = input.companySettings;
+  const occasion = inferMeetingOccasion(input.title);
+  const lunchDurationMin = Math.round((cs.lunchEnd - cs.lunchStart) * 60);
+  const durationMinutes =
+    occasion === "lunch"
+      ? Math.min(input.durationMinutes, lunchDurationMin)
+      : input.durationMinutes;
 
   return {
     title: input.title || "새 회의",
     description: input.description?.trim() ?? "",
     purpose,
     purposeConfidence: confidence,
-    durationMinutes: input.durationMinutes,
+    occasion,
+    durationMinutes,
     dateRangeStart: `${input.weekDays[0]}T${hourToTimeStr(cs.commuteIn)}:00`,
     dateRangeEnd: `${input.weekDays[input.weekDays.length - 1]}T${hourToTimeStr(cs.commuteOut)}:00`,
-    requiredRoom: input.roomRequired !== false,
-    forcedRoomId: input.forcedRoomId,
+    requiredRoom: occasion === "default" ? input.roomRequired !== false : false,
+    forcedRoomId: occasion === "default" ? input.forcedRoomId : null,
     requiredIds: input.requiredIds,
     optionalIds: input.optionalIds,
   };
@@ -425,6 +486,16 @@ function getAdjacentEvents(
   return { before, after };
 }
 
+function getFollowingAdjacentEvent(
+  personId: string,
+  slotStart: Date,
+  slotEnd: Date,
+  bufferMin: number,
+  events: Record<string, CalendarEvent[]>,
+) {
+  return getAdjacentEvents(personId, slotStart, slotEnd, bufferMin, events).after;
+}
+
 function getAdjacentEvent(
   personId: string,
   slotStart: Date,
@@ -436,26 +507,17 @@ function getAdjacentEvent(
   return before || after;
 }
 
-function buildOrganizerBackToBackDescription(adjacent: {
-  before?: CalendarEvent;
-  after?: CalendarEvent;
-}) {
-  const { before, after } = adjacent;
-  if (before && after) {
-    return `앞 뒤로 ${before.title},${after.title}가 있어요. 옮길 수 있는지 확인해 보세요.`;
-  }
-  if (before) {
-    return `앞에 ${before.title}가 있어요. 옮길 수 있는지 확인해 보세요.`;
-  }
-  if (after) {
-    return `뒤에 ${after.title}가 있어요. 옮길 수 있는지 확인해 보세요.`;
-  }
-  return "앞뒤로 일정이 이어져 있어요. 옮길 수 있는지 확인해 보세요.";
-}
-
 function focusEventLabel(blocking?: CalendarEvent) {
   const title = blocking?.title?.trim();
   return title || "집중 근무";
+}
+
+function countCalendarEventAttendees(event?: CalendarEvent) {
+  if (!event) return 1;
+  if (event.meetingMeta) {
+    return event.meetingMeta.requiredIds.length + event.meetingMeta.optionalIds.length;
+  }
+  return 1;
 }
 
 function buildFocusConflictCheckpoint(input: {
@@ -464,19 +526,29 @@ function buildFocusConflictCheckpoint(input: {
   blocking?: CalendarEvent;
 }): Checkpoint {
   const focusLabel = focusEventLabel(input.blocking);
+  const blockingMeta = {
+    blockingEventId: input.blocking?.id,
+    blockingPersonId: input.person.id,
+    blockingEventTitle: focusLabel,
+    blockingEventAttendeeCount: countCalendarEventAttendees(input.blocking),
+  };
   if (input.isOrganizer) {
     return {
       type: "focus_conflict",
       targetPersonId: input.person.id,
-      title: "집중 근무 겹침",
-      description: `${focusLabel}와 겹쳐요. 다른 시간으로 옮겨 보세요.`,
+      actorLabel: `${personFirstName(input.person.name)}님`,
+      title: focusLabel,
+      description: "와 겹쳐요. 옮겨 보세요.",
+      ...blockingMeta,
     };
   }
   return {
     type: "focus_conflict",
     targetPersonId: input.person.id,
-    title: `${personFirstName(input.person.name)}님 집중 근무 겹침`,
-    description: `${focusLabel}를 다른 시간으로 옮길 수 있는지 확인해 보세요.`,
+    actorLabel: `${personFirstName(input.person.name)}님`,
+    title: focusLabel,
+    description: "을 옮길 수 있는지 확인해 보세요.",
+    ...blockingMeta,
   };
 }
 
@@ -631,6 +703,7 @@ export function buildCheckpoints(input: {
   selectedRoom?: Room;
   requiredExternalIds: string[];
   organizerId: string;
+  skipBufferAndSoftChecks?: boolean;
 }): Checkpoint[] {
   const {
     start,
@@ -645,6 +718,7 @@ export function buildCheckpoints(input: {
     requiredExternalIds,
     organizerId,
   } = input;
+  const skipBufferAndSoftChecks = input.skipBufferAndSoftChecks === true;
   const checkpoints: Checkpoint[] = [];
 
   const unavailableRequired = requiredIds.filter((id) => {
@@ -679,24 +753,26 @@ export function buildCheckpoints(input: {
     });
   }
 
-  if (softFlags.beforeLeaving) {
-    checkpoints.push({
-      type: "before_leaving",
-      title: "퇴근 직전 시간",
-      description: "정해진 회의 시간을 지키고, 남은 안건은 회의 후 비동기로 정리해 보세요.",
-    });
-  } else if (softFlags.afterLunch) {
-    checkpoints.push({
-      type: "after_lunch",
-      title: "점심 직후 시간",
-      description: "발표 위주보다 토론·질의응답 방식으로 회의를 구성해 보세요.",
-    });
-  } else if (softFlags.justArrived) {
-    checkpoints.push({
-      type: "just_arrived",
-      title: "출근 직후 시간",
-      description: "참석자가 미리 준비할 수 있도록 회의 전날 안건과 자료를 공유해 보세요.",
-    });
+  if (!skipBufferAndSoftChecks) {
+    if (softFlags.beforeLeaving) {
+      checkpoints.push({
+        type: "before_leaving",
+        title: "퇴근 직전 시간",
+        description: "정해진 회의 시간을 지키고, 남은 안건은 회의 후 비동기로 정리해 보세요.",
+      });
+    } else if (softFlags.afterLunch) {
+      checkpoints.push({
+        type: "after_lunch",
+        title: "점심 직후 시간",
+        description: "발표 위주보다 토론 · 질의응답 방식으로 회의를 구성해 보세요.",
+      });
+    } else if (softFlags.justArrived) {
+      checkpoints.push({
+        type: "just_arrived",
+        title: "출근 직후 시간",
+        description: "안건을 미리 공유해서 오전 준비 부담을 줄여 보세요.",
+      });
+    }
   }
 
   if (requiredExternalIds.length > 0) {
@@ -733,53 +809,47 @@ export function buildCheckpoints(input: {
     for (const id of otherMovableRequired) {
       const person = people.find((p) => p.id === id);
       if (!person) continue;
+      const blocking = personStatuses[id].blocking;
+      const eventTitle = blocking?.title?.trim() || "일정";
       checkpoints.push({
         type: "coordination_needed",
-        title: `${personFirstName(person.name)}님 일정 조율 필요`,
-        description: "해당 시간 참석 가능 여부를 확인해 보세요.",
+        targetPersonId: id,
+        actorLabel: `${personFirstName(person.name)}님`,
+        title: eventTitle,
+        description: "을 옮길 수 있는지 확인해 보세요.",
+        blockingEventId: blocking?.id,
+        blockingPersonId: id,
+        blockingEventTitle: eventTitle,
+        blockingEventAttendeeCount: countCalendarEventAttendees(blocking),
       });
     }
   }
 
-  const hasBackToBack = allIds.some(
+  const hasBackToBack = !skipBufferAndSoftChecks && allIds.some(
     (id) =>
       personStatuses[id].state === "available" &&
-      getAdjacentEvent(id, start, input.end, RECOMMENDATION_PHILOSOPHY.adjacentBufferMinutes, events),
+      getFollowingAdjacentEvent(id, start, input.end, RECOMMENDATION_PHILOSOPHY.adjacentBufferMinutes, events),
   );
-  const backToBackIds = allIds.filter((id) => {
+  const backToBackIds = skipBufferAndSoftChecks ? [] : allIds.filter((id) => {
     if (personStatuses[id].state !== "available") return false;
-    const adjacent = getAdjacentEvents(
+    return !!getFollowingAdjacentEvent(
       id,
       start,
       input.end,
       RECOMMENDATION_PHILOSOPHY.adjacentBufferMinutes,
       events,
     );
-    return !!(adjacent.before || adjacent.after);
   });
-  if (hasBackToBack) {
-    for (const id of backToBackIds.slice(0, 2)) {
-      const person = people.find((p) => p.id === id);
-      if (!person) continue;
-      const isOrganizer = id === organizerId;
-      const adjacent = getAdjacentEvents(
-        id,
-        start,
-        input.end,
-        RECOMMENDATION_PHILOSOPHY.adjacentBufferMinutes,
-        events,
-      );
-      checkpoints.push({
-        type: "back_to_back_meeting",
-        title: `${personFirstName(person.name)}님 연속 회의`,
-        description: isOrganizer
-          ? buildOrganizerBackToBackDescription(adjacent)
-          : "앞뒤로 일정이 이어져 있어요. 참석 가능한지 확인해 보세요.",
-      });
-    }
+  if (hasBackToBack && backToBackIds.length > 0) {
+    const names = personNames(backToBackIds, people).sort((a, b) => a.localeCompare(b, "ko"));
+    checkpoints.push({
+      type: "back_to_back_meeting",
+      title: `${formatNames(names)} 바로 다음 회의 있음`,
+      description: "시간 안에 끝날 수 있도록 회의록을 미리 공유해 보세요.",
+    });
   }
 
-  const fatiguedIds = allIds.filter((id) => {
+  const fatiguedIds = skipBufferAndSoftChecks ? [] : allIds.filter((id) => {
     if (personStatuses[id].state !== "available") return false;
     return getDayMeetingCount(id, start, events) >= RECOMMENDATION_PHILOSOPHY.fatigueMeetingThreshold;
   });
@@ -790,7 +860,7 @@ export function buildCheckpoints(input: {
       checkpoints.push({
         type: "fatigue",
         title: `${formatNames(personNames(dedupedFatiguedIds, people))} 회의 ${threshold}건 이상`,
-        description: "불필요한 안건은 과감히 빼고, 정해진 시간 안에 회의를 마무리해 보세요.",
+        description: "집중력이 떨어질 수 있으니 회의가 끝난 뒤 결정된 사항을 정리해서 공유해 보세요.",
       });
     }
   }
@@ -811,7 +881,7 @@ function buildComparativeLeads(candidate: SlotCandidate, pool: SlotCandidate[]):
 
   const earliest = pool.reduce((best, c) => (c.start.getTime() < best.start.getTime() ? c : best));
   if (candidateKey === slotTimeKey(earliest.start)) {
-    lines.push("3개 후보 중 가장 이른 시간이에요.");
+    lines.push("3개 후보 중 가장 빠른 시간이에요.");
   }
 
   const maxPart = Math.max(...pool.map((c) => c.metrics.participationScore));
@@ -826,9 +896,27 @@ function buildComparativeLeads(candidate: SlotCandidate, pool: SlotCandidate[]):
   return lines;
 }
 
+/** 조율 UI에 표시되는 건수 — movable 충돌 일정 수 (적을수록 우선) */
+function getCandidateCoordinationCost(candidate: SlotCandidate): number {
+  const movableBlockerIds = new Set(
+    candidate.requiredIds.filter((id) => candidate.personStatuses[id].state === "movable_conflict"),
+  );
+  if (movableBlockerIds.size === 0) return 0;
+
+  return candidate.checkpoints.filter(
+    (checkpoint) =>
+      checkpoint.blockingEventId &&
+      checkpoint.blockingPersonId &&
+      movableBlockerIds.has(checkpoint.blockingPersonId),
+  ).length;
+}
+
 function compareCandidatesForDisplay(a: SlotCandidate, b: SlotCandidate) {
   const rankDiff = STATUS_RANK[a.status] - STATUS_RANK[b.status];
   if (rankDiff !== 0) return rankDiff;
+
+  const coordinationDiff = getCandidateCoordinationCost(a) - getCandidateCoordinationCost(b);
+  if (coordinationDiff !== 0) return coordinationDiff;
 
   const checkpointDiff = a.checkpoints.length - b.checkpoints.length;
   if (checkpointDiff !== 0) return checkpointDiff;
@@ -840,6 +928,46 @@ function compareCandidatesForDisplay(a: SlotCandidate, b: SlotCandidate) {
   if (Math.abs(scoreDiff) > 1e-9) return scoreDiff;
 
   return a.start.getTime() - b.start.getTime();
+}
+
+/** 캐러셀 표시: tier 우선 → 조율 비용 낮을수록 → 가까운 시간 */
+function compareCandidatesForCarousel(a: SlotCandidate, b: SlotCandidate) {
+  const tierDiff = a.tier - b.tier;
+  if (tierDiff !== 0) return tierDiff;
+
+  const coordinationDiff = getCandidateCoordinationCost(a) - getCandidateCoordinationCost(b);
+  if (coordinationDiff !== 0) return coordinationDiff;
+
+  const timeDiff = a.start.getTime() - b.start.getTime();
+  if (timeDiff !== 0) return timeDiff;
+  return compareCandidatesForDisplay(a, b);
+}
+
+const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"] as const;
+
+function mondayOfWeek(date: Date) {
+  const copy = new Date(date);
+  const day = copy.getDay();
+  const offset = day === 0 ? -6 : 1 - day;
+  copy.setDate(copy.getDate() + offset);
+  copy.setHours(12, 0, 0, 0);
+  return copy;
+}
+
+export function formatRelativeWeekdayLabel(date: Date, anchorDateStr: string) {
+  const weekday = WEEKDAY_KO[date.getDay()];
+  const anchorMonday = mondayOfWeek(toDate(`${anchorDateStr}T12:00:00`));
+  const dateMonday = mondayOfWeek(date);
+  const diffWeeks = Math.round((dateMonday.getTime() - anchorMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
+  if (diffWeeks === 0) return `이번 주 ${weekday}요일`;
+  if (diffWeeks === 1) return `다음주 ${weekday}요일`;
+  if (diffWeeks === -1) return `지난주 ${weekday}요일`;
+  return `${date.getMonth() + 1}월 ${date.getDate()}일 (${weekday})`;
+}
+
+export function getRecommendationWeekDays(anchorDateStr: string, pool: readonly string[]) {
+  const filtered = pool.filter((day) => day >= anchorDateStr);
+  return filtered.length > 0 ? filtered : [...pool];
 }
 
 export function buildPositiveValidationReasons(input: {
@@ -856,8 +984,40 @@ export function buildPositiveValidationReasons(input: {
   softPenalty: number;
   softTimeFlags: SlotCandidate["softTimeFlags"];
   hasBackToBack: boolean;
+  occasion?: MeetingOccasion;
 }) {
   const reasons: string[] = [];
+
+  if (input.requiredCount > 0 && input.requiredAvailableCount < input.requiredCount) {
+    return reasons;
+  }
+
+  const {
+    requiredAvailableCount,
+    requiredCount,
+    optionalAvailableCount,
+    optionalCount,
+    allCount,
+    bufferOkCount,
+    softPenalty,
+    softTimeFlags,
+    hasBackToBack,
+  } = input;
+
+  const allAvailable =
+    allCount > 0 &&
+    requiredAvailableCount === requiredCount &&
+    optionalAvailableCount === optionalCount;
+
+  if (allAvailable) {
+    pushUniqueReason(reasons, "전 인원이 참석 가능해요.");
+  } else if (requiredCount > 0 && requiredAvailableCount === requiredCount) {
+    pushUniqueReason(reasons, `필수 참석자 ${requiredCount}명 모두 참석 가능해요.`);
+  }
+
+  if (optionalCount > 0 && optionalAvailableCount === optionalCount && !allAvailable) {
+    pushUniqueReason(reasons, `선택 참석자 ${optionalCount}명도 모두 참석 가능해요.`);
+  }
 
   if (input.pool && input.pool.length > 1) {
     for (const line of buildComparativeLeads(input.candidate, input.pool)) {
@@ -875,40 +1035,23 @@ export function buildPositiveValidationReasons(input: {
     }
   }
 
-  const {
-    requiredAvailableCount,
-    requiredCount,
-    optionalAvailableCount,
-    optionalCount,
-    allCount,
-    bufferOkCount,
-    softPenalty,
-    softTimeFlags,
-    hasBackToBack,
-  } = input;
-
-  if (
-    allCount > 0 &&
-    requiredAvailableCount === requiredCount &&
-    optionalAvailableCount === optionalCount
-  ) {
-    pushUniqueReason(reasons, "전 인원이 참석 가능해요.");
-  }
-
-  if (requiredCount > 0 && requiredAvailableCount === requiredCount) {
-    pushUniqueReason(reasons, `필수 참석자 ${requiredCount}명 모두 참석 가능해요.`);
-  }
-
-  if (optionalCount > 0 && optionalAvailableCount === optionalCount) {
-    pushUniqueReason(reasons, `선택 참석자 ${optionalCount}명도 모두 참석 가능해요.`);
-  }
-
   const bufferThreshold = Math.ceil(allCount * RECOMMENDATION_PHILOSOPHY.bufferOkRatio);
-  if (allCount > 0 && bufferOkCount >= bufferThreshold) {
+  if (
+    input.occasion === "default" &&
+    allCount > 0 &&
+    bufferOkCount >= bufferThreshold
+  ) {
     pushUniqueReason(reasons, `${allCount}명 중 ${bufferOkCount}명, 회의 전후 30분 일정이 비어 있어요.`);
   }
 
+  if (input.occasion === "lunch") {
+    pushUniqueReason(reasons, "점심 시간대로 잡았어요.");
+  } else if (input.occasion === "dinner") {
+    pushUniqueReason(reasons, "퇴근 시간에 맞춰 잡았어요.");
+  }
+
   if (
+    input.occasion === "default" &&
     softPenalty === 0 &&
     !softTimeFlags.beforeLeaving &&
     !softTimeFlags.afterLunch &&
@@ -955,7 +1098,7 @@ function buildRoomAssignmentReason(input: {
   if (!room) return null;
 
   if (availableRoomCount === 1) {
-    return "이 시간대에 예약 가능한 유일한 회의실이에요.";
+    return "전 인원이 가능한 회의실이 있어요.";
   }
 
   if (!crossTeam) {
@@ -991,11 +1134,22 @@ function computeCompositeScore(candidate: SlotCandidate, purpose: MeetingPurpose
   });
   score += candidate.metrics.participationScore * 100;
   score -= candidate.metrics.softPenalty * 50;
+  score -= getCandidateCoordinationCost(candidate) * 50_000;
   score -= STATUS_RANK[candidate.status] * 1_000_000;
   return score;
 }
 
 export function generateSlots(request: RecommendationRequest, companySettings: CompanySettings) {
+  if (request.occasion === "lunch") {
+    return generateLunchSlots(request, companySettings);
+  }
+  if (request.occasion === "dinner") {
+    return generateDinnerSlots(request, companySettings);
+  }
+  return generateDefaultSlots(request, companySettings);
+}
+
+function generateDefaultSlots(request: RecommendationRequest, companySettings: CompanySettings) {
   const bizStart = companySettings.commuteIn;
   const bizEnd = companySettings.commuteOut;
   const slots: { start: Date; end: Date }[] = [];
@@ -1029,6 +1183,65 @@ export function generateSlots(request: RecommendationRequest, companySettings: C
   return slots;
 }
 
+function generateLunchSlots(request: RecommendationRequest, companySettings: CompanySettings) {
+  const { lunchStart, lunchEnd } = companySettings;
+  const slots: { start: Date; end: Date }[] = [];
+  const rangeStart = toDate(request.dateRangeStart);
+  const rangeEnd = toDate(request.dateRangeEnd);
+  let cursor = new Date(rangeStart);
+  cursor.setHours(0, 0, 0, 0);
+  const lastMoment = new Date(rangeEnd);
+
+  while (cursor <= lastMoment) {
+    const day = cursor.getDay();
+    if (day !== 0 && day !== 6) {
+      for (let h = lunchStart; h < lunchEnd; h += RECOMMENDATION_PHILOSOPHY.slotStepHours) {
+        const slotStart = new Date(cursor);
+        slotStart.setHours(Math.floor(h), (h % 1) * 60, 0, 0);
+        const slotEnd = addMin(slotStart, request.durationMinutes);
+        const slotEndHour = hourOf(slotEnd);
+        if (
+          slotEndHour <= lunchEnd + 1e-9 &&
+          slotStart >= rangeStart &&
+          slotEnd <= lastMoment
+        ) {
+          slots.push({ start: slotStart, end: slotEnd });
+        }
+      }
+    }
+    cursor.setDate(cursor.getDate() + 1);
+    cursor.setHours(0, 0, 0, 0);
+  }
+
+  return slots;
+}
+
+function generateDinnerSlots(request: RecommendationRequest, companySettings: CompanySettings) {
+  const dinnerStart = companySettings.commuteOut;
+  const slots: { start: Date; end: Date }[] = [];
+  const rangeStart = toDate(request.dateRangeStart);
+  const rangeEnd = toDate(request.dateRangeEnd);
+  let cursor = new Date(rangeStart);
+  cursor.setHours(0, 0, 0, 0);
+  const lastMoment = new Date(rangeEnd);
+
+  while (cursor <= lastMoment) {
+    const day = cursor.getDay();
+    if (day !== 0 && day !== 6) {
+      const slotStart = new Date(cursor);
+      slotStart.setHours(Math.floor(dinnerStart), (dinnerStart % 1) * 60, 0, 0);
+      const slotEnd = addMin(slotStart, request.durationMinutes);
+      if (slotStart >= rangeStart && slotStart <= lastMoment) {
+        slots.push({ start: slotStart, end: slotEnd });
+      }
+    }
+    cursor.setDate(cursor.getDate() + 1);
+    cursor.setHours(0, 0, 0, 0);
+  }
+
+  return slots;
+}
+
 function evaluateSlot(
   slot: { start: Date; end: Date },
   request: RecommendationRequest,
@@ -1042,6 +1255,7 @@ function evaluateSlot(
   const { start, end } = slot;
   const { requiredIds, optionalIds } = request;
   const allIds = [...requiredIds, ...optionalIds];
+  const isCasualOccasion = request.occasion === "lunch" || request.occasion === "dinner";
   const personStatuses: Record<string, PersonSlotStatus> = {};
   allIds.forEach((id) => {
     personStatuses[id] = getPersonStatus(id, start, end, events);
@@ -1054,21 +1268,24 @@ function evaluateSlot(
   const optionalAvailable = optionalIds.filter((id) => personStatuses[id].state === "available");
   const optionalUnavailable = optionalIds.filter((id) => personStatuses[id].state !== "available");
 
-  const requiredExternalNoBuffer = requiredExternal.filter(
-    (id) =>
-      !hasTravelBuffer(
-        id,
-        start,
-        end,
-        events,
-        RECOMMENDATION_PHILOSOPHY.externalTravelBufferMinutes,
-      ),
-  );
+  const requiredExternalNoBuffer = isCasualOccasion
+    ? []
+    : requiredExternal.filter(
+        (id) =>
+          !hasTravelBuffer(
+            id,
+            start,
+            end,
+            events,
+            RECOMMENDATION_PHILOSOPHY.externalTravelBufferMinutes,
+          ),
+      );
 
   const externalOnlyDayRequired = requiredExternal.filter(
     (id) => dayAlternativeContext.get(`${id}:${start.toDateString()}`) === true,
   );
   const externalOnlyDayMissingBuffer =
+    !isCasualOccasion &&
     externalOnlyDayRequired.length > 0 &&
     externalOnlyDayRequired.some((id) =>
       requiredExternalNoBuffer.includes(id),
@@ -1095,36 +1312,44 @@ function evaluateSlot(
     availableRoomCount: availableRooms.length,
   }) ?? "예약 가능한 회의실이에요.";
 
-  const softFlags = getSoftTimeFlags(start, end, companySettings);
-  const hasBackToBack = allIds.some(
-    (id) =>
-      personStatuses[id].state === "available" &&
-      getAdjacentEvent(id, start, end, RECOMMENDATION_PHILOSOPHY.adjacentBufferMinutes, events),
-  );
-  const hasFatigue = allIds.some((id) => {
-    if (personStatuses[id].state !== "available") return false;
-    return getDayMeetingCount(id, start, events) >= RECOMMENDATION_PHILOSOPHY.fatigueMeetingThreshold;
-  });
+  const softFlags = isCasualOccasion
+    ? { justArrived: false, beforeLeaving: false, afterLunch: false }
+    : getSoftTimeFlags(start, end, companySettings);
+  const hasBackToBack = isCasualOccasion
+    ? false
+    : allIds.some(
+        (id) =>
+          personStatuses[id].state === "available" &&
+          getFollowingAdjacentEvent(id, start, end, RECOMMENDATION_PHILOSOPHY.adjacentBufferMinutes, events),
+      );
+  const hasFatigue = isCasualOccasion
+    ? false
+    : allIds.some((id) => {
+        if (personStatuses[id].state !== "available") return false;
+        return getDayMeetingCount(id, start, events) >= RECOMMENDATION_PHILOSOPHY.fatigueMeetingThreshold;
+      });
   const focusConflictCount = requiredMovable.filter(
     (id) => personStatuses[id].blocking?.type === "focus",
   ).length;
 
-  const softPenalty = computeSoftPenalty({
-    softFlags,
-    requiredIds,
-    optionalIds,
-    allIds,
-    personStatuses,
-    events,
-    start,
-    end,
-    hasBackToBack,
-    hasFatigue,
-    requiredExternalIds: requiredExternal,
-    requiredExternalNoBufferIds: requiredExternalNoBuffer,
-    optionalUnavailableCount: optionalUnavailable.length,
-    focusConflictCount,
-  });
+  const softPenalty = isCasualOccasion
+    ? 0
+    : computeSoftPenalty({
+        softFlags,
+        requiredIds,
+        optionalIds,
+        allIds,
+        personStatuses,
+        events,
+        start,
+        end,
+        hasBackToBack,
+        hasFatigue,
+        requiredExternalIds: requiredExternal,
+        requiredExternalNoBufferIds: requiredExternalNoBuffer,
+        optionalUnavailableCount: optionalUnavailable.length,
+        focusConflictCount,
+      });
 
   const checkpoints = buildCheckpoints({
     start,
@@ -1139,6 +1364,7 @@ function evaluateSlot(
     selectedRoom: defaultRoom,
     requiredExternalIds: requiredExternal,
     organizerId: options.organizerId,
+    skipBufferAndSoftChecks: isCasualOccasion,
   });
 
   let status: CandidateStatus;
@@ -1157,11 +1383,13 @@ function evaluateSlot(
   else if (tier === 2) status = !roomOk ? "needs_coordination" : "has_checkpoints";
   else status = "ready";
 
-  const bufferOkCount = allIds.filter(
-    (id) =>
-      personStatuses[id].state === "available" &&
-      !getAdjacentEvent(id, start, end, RECOMMENDATION_PHILOSOPHY.adjacentBufferMinutes, events),
-  ).length;
+  const bufferOkCount = isCasualOccasion
+    ? allIds.length
+    : allIds.filter(
+        (id) =>
+          personStatuses[id].state === "available" &&
+          !getAdjacentEvent(id, start, end, RECOMMENDATION_PHILOSOPHY.adjacentBufferMinutes, events),
+      ).length;
 
   const participationScore =
     (requiredAvailable.length + optionalAvailable.length) / (allIds.length || 1);
@@ -1183,6 +1411,7 @@ function evaluateSlot(
     start,
     end,
     status,
+    occasion: request.occasion,
     personStatuses,
     requiredRoom: request.requiredRoom,
     requiredIds,
@@ -1200,7 +1429,10 @@ function evaluateSlot(
   };
 
   candidate.metrics.compositeScore = computeCompositeScore(candidate, request.purpose);
-  candidate.validationReasons = buildPositiveValidationReasons(getValidationReasonInput(candidate));
+  candidate.validationReasons = buildPositiveValidationReasons({
+    ...getValidationReasonInput(candidate),
+    occasion: request.occasion,
+  });
 
   return candidate;
 }
@@ -1210,6 +1442,10 @@ export function sortCandidates(candidates: SlotCandidate[], purpose: MeetingPurp
   return candidates.slice().sort((a, b) => {
     const rankDiff = STATUS_RANK[a.status] - STATUS_RANK[b.status];
     if (rankDiff !== 0) return rankDiff;
+
+    const coordinationDiff = getCandidateCoordinationCost(a) - getCandidateCoordinationCost(b);
+    if (coordinationDiff !== 0) return coordinationDiff;
+
     const scoreDiff = b.metrics.compositeScore - a.metrics.compositeScore;
     if (Math.abs(scoreDiff) > 1e-9) return scoreDiff;
     return a.start.getTime() - b.start.getTime();
@@ -1237,9 +1473,7 @@ export function pickProfiledCandidates(
   organizerId: string,
 ): SlotCandidate[] {
   const visible = candidates.filter((c) => c.tier < 3);
-  const pool = visible.length > 0 ? visible : candidates.filter((c) => c.requiredIds.every(
-    (id) => c.personStatuses[id].state !== "unavailable",
-  ));
+  const pool = visible;
   if (pool.length === 0) return [];
 
   const sorted = sortCandidates(pool, purpose);
@@ -1278,6 +1512,8 @@ export function pickProfiledCandidates(
     pickUniqueCandidate(sorted, usedKeys, (a, b) => {
       const rankDiff = STATUS_RANK[a.status] - STATUS_RANK[b.status];
       if (rankDiff !== 0) return rankDiff;
+      const coordinationDiff = getCandidateCoordinationCost(a) - getCandidateCoordinationCost(b);
+      if (coordinationDiff !== 0) return coordinationDiff;
       const timeDiff = a.start.getTime() - b.start.getTime();
       if (timeDiff !== 0) return timeDiff;
       return b.metrics.compositeScore - a.metrics.compositeScore;
@@ -1293,12 +1529,13 @@ export function pickProfiledCandidates(
     result.push(candidate);
   }
 
-  const sortedForDisplay = result.slice().sort(compareCandidatesForDisplay);
+  const sortedForDisplay = result.slice().sort(compareCandidatesForCarousel);
   return sortedForDisplay.map((candidate) => ({
     ...candidate,
     validationReasons: buildPositiveValidationReasons({
       ...getValidationReasonInput(candidate),
       pool: sortedForDisplay,
+      occasion: candidate.occasion,
     }),
   }));
 }
@@ -1328,6 +1565,7 @@ const COORDINATION_CHECKPOINT_TYPES = new Set<CheckpointType>([
   "focus_conflict",
   "coordination_needed",
   "required_partial",
+  "required_external",
 ]);
 
 export function getCoordinationCheckpoints(candidate: SlotCandidate) {
@@ -1338,28 +1576,45 @@ export function getReferenceCheckpoints(candidate: SlotCandidate) {
   return candidate.checkpoints.filter((checkpoint) => !COORDINATION_CHECKPOINT_TYPES.has(checkpoint.type));
 }
 
-/** 조율 1건이면 확정 가능 — 필수 참석자 movable 충돌만 */
+/** 조율 가능 — 필수 참석자 movable 충돌만 */
 export function buildCandidateCoordinationSection(candidate: SlotCandidate) {
   if (candidate.tier !== 2) return null;
-  if (countRequiredMovableCoordinationBlockers(candidate) !== 1) return null;
 
-  const checkpoints = getCoordinationCheckpoints(candidate);
+  const movableCount = countRequiredMovableCoordinationBlockers(candidate);
+  if (movableCount === 0) return null;
+
+  const movableBlockerIds = new Set(
+    candidate.requiredIds.filter((id) => candidate.personStatuses[id].state === "movable_conflict"),
+  );
+  const checkpoints = getCoordinationCheckpoints(candidate).filter(
+    (checkpoint) =>
+      checkpoint.blockingEventId &&
+      checkpoint.blockingPersonId &&
+      movableBlockerIds.has(checkpoint.blockingPersonId),
+  );
   if (checkpoints.length === 0) return null;
 
+  const visibleCheckpoints = checkpoints.slice(0, RECOMMENDATION_PHILOSOPHY.maxCoordinationBlockers);
+  const displayedCount = visibleCheckpoints.length;
+
   return {
-    headline: "1건만 조율하면 이 시간으로 확정할 수 있어요.",
-    checkpoints,
+    headline: displayedCount === 1
+      ? "1건만 조율하면 이 시간으로 확정할 수 있어요."
+      : `${displayedCount}건 조율하면 이 시간으로 확정할 수 있어요.`,
+    checkpoints: visibleCheckpoints,
   };
 }
 
-function countRequiredPeopleBlockers(input: {
-  personStatuses: Record<string, PersonSlotStatus>;
-  requiredIds: string[];
-}) {
-  return input.requiredIds.filter((id) => {
-    const state = input.personStatuses[id].state;
-    return state === "movable_conflict" || state === "external_conflict";
-  }).length;
+export function resolveCheckpointBlockingEvent(
+  checkpoint: Checkpoint,
+  events: Record<string, CalendarEvent[]>,
+): { personId: string; event: CalendarEvent } | null {
+  if (!checkpoint.blockingEventId || !checkpoint.blockingPersonId) return null;
+  const event = (events[checkpoint.blockingPersonId] || []).find(
+    (item) => item.id === checkpoint.blockingEventId,
+  );
+  if (!event) return null;
+  return { personId: checkpoint.blockingPersonId, event };
 }
 
 /** tier 1(확정 가능)을 막는 확인할 점 — 조율·참석 확인이 필요한 항목만 */
@@ -1414,12 +1669,18 @@ export function computeRecommendationTier(input: {
   externalOnlyDayMissingBuffer: boolean;
   organizerId?: string;
 }): RecommendationTier {
-  if (input.requiredHardUnavailable.length > 0 || input.externalOnlyDayMissingBuffer) {
-    return 3;
-  }
+  if (input.externalOnlyDayMissingBuffer) return 3;
 
-  const peopleBlockers = countRequiredPeopleBlockers(input);
-  if (peopleBlockers >= 2) return 3;
+  const requiredNonCoordinatable = input.requiredIds.filter((id) => {
+    const state = input.personStatuses[id].state;
+    return state === "unavailable" || state === "external_conflict";
+  });
+  if (requiredNonCoordinatable.length > 0) return 3;
+
+  const movableCoordinationCount = input.requiredIds.filter(
+    (id) => input.personStatuses[id]?.state === "movable_conflict",
+  ).length;
+  if (movableCoordinationCount > RECOMMENDATION_PHILOSOPHY.maxCoordinationBlockers) return 3;
 
   const allRequiredAvailable = input.requiredIds.every(
     (id) => input.personStatuses[id].state === "available",
@@ -1486,7 +1747,9 @@ export function generateCandidates(
   rooms: Room[],
   options: GenerateCandidatesOptions,
 ) {
-  const slots = generateSlots(request, companySettings);
+  const slots = generateSlots(request, companySettings).filter(
+    (slot) => !options.notBefore || slot.start >= options.notBefore,
+  );
 
   const dayAlternativeContext = new Map<string, boolean>();
   for (const personId of request.requiredIds) {
@@ -1530,4 +1793,40 @@ export function getRoomAssignmentReasonForCandidate(
     organizerId,
     availableRoomCount: candidate.availableRooms.length,
   });
+}
+
+function formatShortScheduleRange(start: Date, end: Date): string {
+  const month = start.getMonth() + 1;
+  const day = start.getDate();
+  const fmtTimePart = (date: Date, includePeriod: boolean) => {
+    const h = date.getHours();
+    const period = h < 12 ? "오전" : "오후";
+    const hour12 = h % 12 === 0 ? 12 : h % 12;
+    const min = date.getMinutes();
+    const time = min === 0 ? `${hour12}시` : `${hour12}시 ${min}분`;
+    return includePeriod ? `${period} ${time}` : time;
+  };
+  const startPeriod = start.getHours() < 12 ? "오전" : "오후";
+  const endPeriod = end.getHours() < 12 ? "오전" : "오후";
+  const timeRange = startPeriod === endPeriod
+    ? `${startPeriod} ${fmtTimePart(start, false)}~${fmtTimePart(end, false)}`
+    : `${fmtTimePart(start, true)}~${fmtTimePart(end, true)}`;
+  return `${month}/${day} ${timeRange}`;
+}
+
+/** 제안 모달에서 다른 사람 일정을 열었을 때 보낼 조율 메시지 초안 */
+export function buildCoordinationDraftMessage(input: {
+  ownerFullName: string;
+  blockingTitle: string;
+  blockingStart: Date;
+  blockingEnd: Date;
+  proposedTitle: string;
+  proposedStart: Date;
+  proposedEnd: Date;
+}): string {
+  const owner = personFirstName(input.ownerFullName);
+  const blockingRange = formatShortScheduleRange(input.blockingStart, input.blockingEnd);
+  const proposedRange = formatShortScheduleRange(input.proposedStart, input.proposedEnd);
+  const proposedTitle = input.proposedTitle.trim() || "새 일정";
+  return `${owner}님, 안녕하세요! ${proposedTitle}(${proposedRange}) 미팅을 잡으려는데 ${input.blockingTitle}(${blockingRange}) 일정과 겹쳐요. ${input.blockingTitle} 일정을 다른 시간으로 옮길 수 있는지 확인 부탁드려요!`;
 }

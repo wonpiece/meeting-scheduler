@@ -6,7 +6,7 @@ export function Overlay({ children, onClose, width = 460, minHeight }) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(17,24,39,0.4)",
+        background: "rgba(17,24,39,0.25)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:onboarding": "vite --port 5173 --strictPort --open '/?onboarding=1'",
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview"
