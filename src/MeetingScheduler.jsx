@@ -77,7 +77,7 @@ const FONT = "'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const STORAGE_KEYS = {
   people: "meeting-scheduler:people-v2",
-  events: "meeting-scheduler:events-v2",
+  events: "meeting-scheduler:events-v3",
   jobs: "meeting-scheduler:jobs",
   companySettings: "meeting-scheduler:company-settings",
   rooms: "meeting-scheduler:rooms",
@@ -162,52 +162,155 @@ const COLOR_PALETTE = [
   { avatarBg: "#e0f2fe", avatarText: "#0369a1" }, { avatarBg: "#fee2e2", avatarText: "#b91c1c" },
 ];
 
-const ROLE_EVENT_TEMPLATES = {
-  "Product Manager": [
-    { day: 0, start: 10, duration: 60, title: "주간 목표 점검" },
-    { day: 1, start: 14, duration: 60, title: "OKR 싱크" },
-    { day: 2, start: 15.5, duration: 30, title: "리더 1:1" },
-    { day: 3, start: 11, duration: 60, title: "제품 의사결정" },
-    { day: 4, start: 16, duration: 60, title: "P&L 리뷰" },
-  ],
-  "Product Designer": [
-    { day: 0, start: 11, duration: 60, title: "디자인 코어 위클리" },
-    { day: 1, start: 15, duration: 60, title: "UX 리뷰" },
-    { day: 2, start: 14, duration: 60, title: "디자인 시스템 위클리" },
-    { day: 3, start: 10.5, duration: 30, title: "메이커 디자인 리뷰" },
-    { day: 4, start: 15.5, duration: 60, title: "페어 디자인 리뷰" },
-  ],
-  "Frontend": [
-    { day: 0, start: 9.5, duration: 30, title: "FE 데일리 스크럼" },
-    { day: 1, start: 9.5, duration: 30, title: "FE 데일리 스크럼" },
-    { day: 2, start: 9.5, duration: 30, title: "FE 데일리 스크럼" },
-    { day: 3, start: 10, duration: 60, title: "Tech All-hands" },
-    { day: 4, start: 14, duration: 60, title: "디자인 시스템 위클리" },
-  ],
-  "Backend": [
-    { day: 0, start: 10, duration: 30, title: "BE 데일리 스크럼" },
-    { day: 1, start: 10, duration: 30, title: "BE 데일리 스크럼" },
-    { day: 2, start: 13, duration: 180, title: "NMD 집중 블록", type: "focus", movable: true },
-    { day: 3, start: 10, duration: 60, title: "Tech All-hands" },
-    { day: 4, start: 15, duration: 60, title: "시스템 디자인 스터디" },
-  ],
-  "Business Development Manager": [
-    { day: 0, start: 11.5, duration: 60, title: "파트너 위클리" },
-    { day: 1, start: 12, duration: 90, title: "파트너 점심 미팅", type: "external" },
-    { day: 2, start: 15, duration: 60, title: "크로스팀 프로젝트 싱크" },
-    { day: 3, start: 10.5, duration: 90, title: "외부 파트너 미팅", type: "external" },
-    { day: 4, start: 16, duration: 30, title: "사업 지표 리뷰" },
-  ],
-  "Operations Manager": [
-    { day: 0, start: 9, duration: 30, title: "운영 현황 체크" },
-    { day: 0, start: 14, duration: 60, title: "운영 스크럼" },
-    { day: 1, start: 10.5, duration: 60, title: "문의 자동답변 Scrum" },
-    { day: 2, start: 9, duration: 30, title: "체커 관리 daily" },
-    { day: 2, start: 15, duration: 90, title: "운영 정기 회의" },
-    { day: 3, start: 11, duration: 60, title: "Search Product & Ops Weekly" },
-    { day: 4, start: 14, duration: 60, title: "운영 개선 미팅" },
-  ],
+const ROLE_CALENDAR_PROFILES = {
+  "Product Manager": {
+    weeklyRange: [6, 9],
+    anchors: [
+      { days: [1], starts: [10, 10.5], duration: 90, titles: ["주간 팀 미팅", "All-hands / 주간 싱크"] },
+      { days: [3], starts: [14, 14.5], duration: 60, titles: ["제품 의사결정", "지표·실험 리뷰"] },
+    ],
+    pools: [
+      { days: [0, 1, 2, 3, 4], starts: [11, 11.5, 13, 14, 15, 16], durations: [30, 60], titles: ["OKR 싱크", "P&L 리뷰", "임팩트 캘리브레이션", "리더 1:1", "스프린트 플래닝", "크로스팀 협의"] },
+      { days: [0, 2, 4], starts: [9.5, 10, 15.5, 16.5], durations: [30, 60, 90], titles: ["워크샵 준비", "리서치 공유", "채용 인터뷰", "회고"] },
+    ],
+    focusChance: 0.35,
+  },
+  "Product Designer": {
+    weeklyRange: [7, 11],
+    anchors: [
+      { days: [1], starts: [10, 10.5], duration: 90, titles: ["주간 팀 미팅", "디자인 챕터 싱크"] },
+      { days: [3], starts: [11, 14], duration: 60, titles: ["디자인 코어 위클리", "디자인 시스템 위클리"] },
+    ],
+    pools: [
+      { days: [0, 1, 2, 3, 4], starts: [11, 12, 13, 14.5, 15.5, 16.5], durations: [30, 60, 90], titles: ["UX 리뷰", "페어 디자인 리뷰", "제품 논의", "실험 설계", "디자인 인터뷰 설명회", "워크샵"] },
+      { days: [0, 2, 4], starts: [10, 13, 15, 17], durations: [30, 60, 120], titles: ["집중 디자인", "리서치 정리", "시안 제작", "디자인 QA"] },
+    ],
+    focusChance: 0.5,
+  },
+  "Operations Manager": {
+    weeklyRange: [10, 14],
+    anchors: [
+      { days: [0, 1, 2, 3, 4], starts: [9, 9.5, 10], duration: 30, titles: ["운영 현황 체크", "운영 데일리"], repeatEachDay: true },
+      { days: [1, 3], starts: [10.5, 11], duration: 60, titles: ["운영 스크럼", "운영 주간 싱크"] },
+    ],
+    pools: [
+      { days: [0, 1, 2, 3, 4], starts: [11.5, 12, 13, 14, 15, 16, 17], durations: [30, 60, 90], titles: ["문의 자동답변 Scrum", "Search Product & Ops Weekly", "채팅파트 운영 싱크", "운영 개선 미팅", "이슈 대응", "체커 관리", "정책 검토"] },
+      { days: [0, 2, 4], starts: [12.5, 13, 18], durations: [60, 90, 120], titles: ["팀 점심", "파트 회식", "외부 도메인 협업"] },
+    ],
+    focusChance: 0.15,
+  },
+  "Business Development Manager": {
+    weeklyRange: [9, 13],
+    anchors: [
+      { days: [1], starts: [10, 10.5], duration: 90, titles: ["주간 팀 미팅", "파트너십 Weekly"] },
+      { days: [3], starts: [11, 11.5], duration: 60, titles: ["사업 지표 리뷰", "세일즈 프로세스 싱크"] },
+    ],
+    pools: [
+      { days: [0, 1, 2, 3, 4], starts: [10, 11, 12, 14, 15, 16, 17], durations: [30, 60, 90], titles: ["외부 파트너 미팅", "파트너 정기 미팅", "크로스팀 프로젝트 싱크", "계약·운영 논의", "고객사 미팅", "제휴 검토", "사업개발 회고"], type: "external", typeChance: 0.45 },
+      { days: [0, 2, 4], starts: [12, 12.5, 13], durations: [60, 90], titles: ["파트너 점심", "알바팀 식사", "고객사 런치"], type: "lunch" },
+    ],
+    focusChance: 0.1,
+  },
+  "Backend": {
+    weeklyRange: [7, 10],
+    anchors: [
+      { days: [0, 1, 3, 4], starts: [10, 10.5, 11], duration: 30, titles: ["BE 데일리 스크럼", "팀 데일리 스크럼"], repeatEachDay: true },
+      { days: [3], starts: [12, 13], duration: 60, titles: ["Tech All-hands", "엔지니어링 올핸즈"] },
+    ],
+    pools: [
+      { days: [0, 1, 2, 3, 4], starts: [11, 12, 13, 14.5, 15.5, 16.5], durations: [30, 60, 90], titles: ["시스템 디자인 스터디", "Local Business BE Bi-Weekly", "API 설계 리뷰", "장애 회고", "기술 스터디", "코드 리뷰", "프로젝트 싱크"] },
+      { days: [2], starts: [13, 14], durations: [120, 180], titles: ["NMD 집중 블록", "No Meeting Day"], type: "focus", movable: true },
+    ],
+    focusChance: 0.65,
+  },
+  "Frontend": {
+    weeklyRange: [6, 9],
+    anchors: [
+      { days: [0, 1, 2, 3, 4], starts: [9.5, 10, 10.5], duration: 30, titles: ["FE 데일리 스크럼", "Platform Daily"], repeatEachDay: true },
+      { days: [3], starts: [12, 12.5], duration: 60, titles: ["Tech All-hands", "프론트엔드 챕터"] },
+    ],
+    pools: [
+      { days: [0, 1, 2, 3, 4], starts: [11, 12, 13, 14.5, 15.5, 16.5], durations: [30, 60, 90], titles: ["디자인 시스템 위클리", "제품 논의", "FE Sync", "개발 생산성 싱크", "QA", "릴리즈 점검", "플랫폼 위클리"] },
+      { days: [0, 2, 4], starts: [13, 14, 15], durations: [60, 120], titles: ["집중 개발", "리팩터링 블록", "기술 부채 정리"], type: "focus", movable: true },
+    ],
+    focusChance: 0.45,
+  },
 };
+
+function hashString(value) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function seededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function pickWithRandom(list, random) {
+  return list[Math.floor(random() * list.length) % list.length];
+}
+
+function overlapsGenerated(items, day, start, duration) {
+  const end = start + duration / 60;
+  return items.some((item) => item.day === day && start < item.start + item.duration / 60 && item.start < end);
+}
+
+function buildWeekSchedule(person, week) {
+  const profile = ROLE_CALENDAR_PROFILES[person.role];
+  if (!profile) return [];
+  const random = seededRandom(hashString(`${person.id}:${person.name}:${person.role}:${week}`));
+  const schedule = [];
+  const addItem = (definition, force = false, fixedDay = null) => {
+    const day = fixedDay ?? pickWithRandom(definition.days, random);
+    let start = pickWithRandom(definition.starts, random);
+    const duration = definition.duration ?? pickWithRandom(definition.durations, random);
+    start += pickWithRandom([-0.5, 0, 0, 0.5], random);
+    start = Math.max(9, Math.min(19.5 - duration / 60, start));
+    if (!force && overlapsGenerated(schedule, day, start, duration)) return false;
+    schedule.push({
+      day, start, duration,
+      title: pickWithRandom(definition.titles, random),
+      type: definition.type && (!definition.typeChance || random() < definition.typeChance) ? definition.type : "meeting",
+      movable: definition.movable ?? false,
+    });
+    return true;
+  };
+
+  profile.anchors.forEach((anchor) => {
+    if (anchor.repeatEachDay) anchor.days.forEach((day) => addItem(anchor, false, day));
+    else addItem(anchor, false);
+  });
+  const [minCount, maxCount] = profile.weeklyRange;
+  const target = minCount + Math.floor(random() * (maxCount - minCount + 1));
+  let guard = 0;
+  while (schedule.length < target && guard < 120) {
+    guard += 1;
+    const pool = pickWithRandom(profile.pools, random);
+    addItem(pool, false);
+  }
+
+  if (random() < profile.focusChance && !schedule.some((item) => item.type === "focus")) {
+    const focusPools = profile.pools.filter((pool) => pool.type === "focus");
+    if (focusPools.length) addItem(pickWithRandom(focusPools, random), false);
+  }
+
+  // 개인별 리듬 차이: 일부는 점심/개인 일정, 일부는 오전 또는 늦은 오후 일정이 더 많음.
+  if (random() < 0.28) addItem({ days: [0, 1, 2, 3, 4], starts: [12, 12.5, 13], duration: 60, titles: ["팀 점심", "점심 약속"], type: "lunch" });
+  if (random() < 0.18) addItem({ days: [0, 1, 2, 3, 4], starts: [17.5, 18], duration: 60, titles: ["개인 일정", "운동"], type: "personal" });
+
+  return schedule.sort((a, b) => a.day - b.day || a.start - b.start);
+}
 
 function formatLocalDateTime(d) {
   const p2 = (n) => String(n).padStart(2, "0");
@@ -222,13 +325,12 @@ function makeDateTime(baseMonday, weekOffset, day, hour) {
 }
 
 function generateRoleEventsForPerson(person) {
-  const templates = ROLE_EVENT_TEMPLATES[person.role] || [];
   const baseMonday = new Date(2026, 6, 13);
   const events = [];
   for (let week = 0; week < 3; week += 1) {
-    templates.forEach((item, index) => {
-      const jitter = ((person.id.charCodeAt(0) + index + week) % 2) * 0.5;
-      const start = makeDateTime(baseMonday, week, item.day, item.start + jitter);
+    const schedule = buildWeekSchedule(person, week);
+    schedule.forEach((item, index) => {
+      const start = makeDateTime(baseMonday, week, item.day, item.start);
       const end = new Date(start.getTime() + item.duration * 60000);
       events.push({
         id: `role-${person.id}-${week}-${index}`,
