@@ -1,4 +1,32 @@
 import React, { useState, useMemo } from "react";
+import {
+  PURPOSE_DEFAULT,
+  buildRecommendationRequest,
+  generateCandidates,
+  hourToTimeStr,
+} from "./config/recommendationPolicy";
+import {
+  COLOR_PALETTE,
+  DEFAULT_COMPANY_SETTINGS,
+  INITIAL_EVENTS,
+  JOBS_BASE,
+  ME_ID,
+  PEOPLE_BASE,
+  ROOM_EVENTS,
+  ROOMS_BASE,
+  TEAMS_BASE,
+  TOWERS,
+  WEEK_DAYS,
+} from "./mock";
+import { AdminPanel } from "./admin/AdminPanel";
+import { resolveJobShort } from "./admin/jobUtils";
+import { PersonMeta } from "./components/PersonMeta";
+import {
+  AI_LOADING_STEP_COUNT,
+  AI_RESULTS_DELAY_MS,
+  AI_STEP_DURATION_MS,
+  AiThinkingStepList,
+} from "./components/AiThinkingLoader";
 import arrowLeftIcon from "./assets/icons/icon-arrow-left-small-mono.svg?raw";
 import arrowRightIcon from "./assets/icons/icon-arrow-right-small-mono.svg?raw";
 import closeIcon from "./assets/icons/icon-x-mono.svg?raw";
@@ -77,7 +105,7 @@ const FONT = "'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const STORAGE_KEYS = {
   people: "meeting-scheduler:people-v2",
-  events: "meeting-scheduler:events-v3",
+  events: "meeting-scheduler:events-v5",
   jobs: "meeting-scheduler:jobs",
   companySettings: "meeting-scheduler:company-settings",
   rooms: "meeting-scheduler:rooms",
@@ -116,31 +144,13 @@ function usePersistentState(key, fallback) {
 }
 
 /* ============================================================
-   1. DATA MODEL — Figma 디자인의 실제 인물명/아바타 색상 그대로 사용
+   1. DATA MODEL — seed는 src/mock/seedData.ts, 생성은 src/mock/eventGenerator.ts
    ============================================================ */
 
-const TEAMS_BASE = ["사업실", "플랫폼팀", "그로스팀", "경영지원실"];
-const TOWERS = ["미르타워", "solar타워"];
-
-const JOBS_BASE = [
-  { id: "pm", name: "Product Manager", short: "PM" },
-  { id: "pd", name: "Product Designer", short: "PD" },
-  { id: "om", name: "Operations Manager", short: "OM" },
-  { id: "fe", name: "Frontend", short: "FE" },
-  { id: "be", name: "Backend", short: "BE" },
-  { id: "bdm", name: "Business Development Manager", short: "BDM" },
-];
-
-const PEOPLE_BASE = [
-  { id: "yj", name: "김지원", team: "사업실", role: "Product Designer", tower: "미르타워", floor: 5, avatarBg: "#e6ebfb", avatarText: "#48429f" },
-  { id: "ky", name: "강유정", team: "사업실", role: "Backend", tower: "미르타워", floor: 6, avatarBg: "#fceded", avatarText: "#b62c2c" },
-  { id: "sm", name: "신미르", team: "사업실", role: "Frontend", tower: "미르타워", floor: 6, avatarBg: "#e3f4f0", avatarText: "#0f766e" },
-  { id: "yc", name: "이예찬", team: "사업실", role: "Product Manager", tower: "미르타워", floor: 5, avatarBg: "#fbf3d1", avatarText: "#ae5b1c" },
-  { id: "kj", name: "김정민", team: "그로스팀", role: "Business Development Manager", tower: "solar타워", floor: 3, avatarBg: "#eef8d9", avatarText: "#4d7c0f" },
-  { id: "ys", name: "염은솔", team: "그로스팀", role: "Operations Manager", tower: "solar타워", floor: 3, avatarBg: "#f3ebfc", avatarText: "#7f31c2" },
-];
-const ME_ID = "yj";
-const DEFAULT_COMPANY_SETTINGS = { lunchStart: 13, lunchEnd: 14.25, commuteIn: 9, commuteOut: 19 };
+const timeStrToHour = (str) => {
+  const [h, m] = str.split(":").map(Number);
+  return h + m / 60;
+};
 
 function normalizeCompanySettings(value) {
   const source = value && typeof value === "object" ? value : {};
@@ -155,222 +165,8 @@ function normalizeCompanySettings(value) {
     commuteOut: asHour(source.commuteOut, DEFAULT_COMPANY_SETTINGS.commuteOut),
   };
 }
-const COLOR_PALETTE = [
-  { avatarBg: "#e6ebfb", avatarText: "#48429f" }, { avatarBg: "#fceded", avatarText: "#b62c2c" },
-  { avatarBg: "#e3f4f0", avatarText: "#0f766e" }, { avatarBg: "#fbf3d1", avatarText: "#ae5b1c" },
-  { avatarBg: "#eef8d9", avatarText: "#4d7c0f" }, { avatarBg: "#f3ebfc", avatarText: "#7f31c2" },
-  { avatarBg: "#e0f2fe", avatarText: "#0369a1" }, { avatarBg: "#fee2e2", avatarText: "#b91c1c" },
-];
-
-const ROLE_CALENDAR_PROFILES = {
-  "Product Manager": {
-    weeklyRange: [6, 9],
-    anchors: [
-      { days: [1], starts: [10, 10.5], duration: 90, titles: ["주간 팀 미팅", "All-hands / 주간 싱크"] },
-      { days: [3], starts: [14, 14.5], duration: 60, titles: ["제품 의사결정", "지표·실험 리뷰"] },
-    ],
-    pools: [
-      { days: [0, 1, 2, 3, 4], starts: [11, 11.5, 13, 14, 15, 16], durations: [30, 60], titles: ["OKR 싱크", "P&L 리뷰", "임팩트 캘리브레이션", "리더 1:1", "스프린트 플래닝", "크로스팀 협의"] },
-      { days: [0, 2, 4], starts: [9.5, 10, 15.5, 16.5], durations: [30, 60, 90], titles: ["워크샵 준비", "리서치 공유", "채용 인터뷰", "회고"] },
-    ],
-    focusChance: 0.35,
-  },
-  "Product Designer": {
-    weeklyRange: [7, 11],
-    anchors: [
-      { days: [1], starts: [10, 10.5], duration: 90, titles: ["주간 팀 미팅", "디자인 챕터 싱크"] },
-      { days: [3], starts: [11, 14], duration: 60, titles: ["디자인 코어 위클리", "디자인 시스템 위클리"] },
-    ],
-    pools: [
-      { days: [0, 1, 2, 3, 4], starts: [11, 12, 13, 14.5, 15.5, 16.5], durations: [30, 60, 90], titles: ["UX 리뷰", "페어 디자인 리뷰", "제품 논의", "실험 설계", "디자인 인터뷰 설명회", "워크샵"] },
-      { days: [0, 2, 4], starts: [10, 13, 15, 17], durations: [30, 60, 120], titles: ["집중 디자인", "리서치 정리", "시안 제작", "디자인 QA"] },
-    ],
-    focusChance: 0.5,
-  },
-  "Operations Manager": {
-    weeklyRange: [10, 14],
-    anchors: [
-      { days: [0, 1, 2, 3, 4], starts: [9, 9.5, 10], duration: 30, titles: ["운영 현황 체크", "운영 데일리"], repeatEachDay: true },
-      { days: [1, 3], starts: [10.5, 11], duration: 60, titles: ["운영 스크럼", "운영 주간 싱크"] },
-    ],
-    pools: [
-      { days: [0, 1, 2, 3, 4], starts: [11.5, 12, 13, 14, 15, 16, 17], durations: [30, 60, 90], titles: ["문의 자동답변 Scrum", "Search Product & Ops Weekly", "채팅파트 운영 싱크", "운영 개선 미팅", "이슈 대응", "체커 관리", "정책 검토"] },
-      { days: [0, 2, 4], starts: [12.5, 13, 18], durations: [60, 90, 120], titles: ["팀 점심", "파트 회식", "외부 도메인 협업"] },
-    ],
-    focusChance: 0.15,
-  },
-  "Business Development Manager": {
-    weeklyRange: [9, 13],
-    anchors: [
-      { days: [1], starts: [10, 10.5], duration: 90, titles: ["주간 팀 미팅", "파트너십 Weekly"] },
-      { days: [3], starts: [11, 11.5], duration: 60, titles: ["사업 지표 리뷰", "세일즈 프로세스 싱크"] },
-    ],
-    pools: [
-      { days: [0, 1, 2, 3, 4], starts: [10, 11, 12, 14, 15, 16, 17], durations: [30, 60, 90], titles: ["외부 파트너 미팅", "파트너 정기 미팅", "크로스팀 프로젝트 싱크", "계약·운영 논의", "고객사 미팅", "제휴 검토", "사업개발 회고"], type: "external", typeChance: 0.45 },
-      { days: [0, 2, 4], starts: [12, 12.5, 13], durations: [60, 90], titles: ["파트너 점심", "알바팀 식사", "고객사 런치"], type: "lunch" },
-    ],
-    focusChance: 0.1,
-  },
-  "Backend": {
-    weeklyRange: [7, 10],
-    anchors: [
-      { days: [0, 1, 3, 4], starts: [10, 10.5, 11], duration: 30, titles: ["BE 데일리 스크럼", "팀 데일리 스크럼"], repeatEachDay: true },
-      { days: [3], starts: [12, 13], duration: 60, titles: ["Tech All-hands", "엔지니어링 올핸즈"] },
-    ],
-    pools: [
-      { days: [0, 1, 2, 3, 4], starts: [11, 12, 13, 14.5, 15.5, 16.5], durations: [30, 60, 90], titles: ["시스템 디자인 스터디", "Local Business BE Bi-Weekly", "API 설계 리뷰", "장애 회고", "기술 스터디", "코드 리뷰", "프로젝트 싱크"] },
-      { days: [2], starts: [13, 14], durations: [120, 180], titles: ["NMD 집중 블록", "No Meeting Day"], type: "focus", movable: true },
-    ],
-    focusChance: 0.65,
-  },
-  "Frontend": {
-    weeklyRange: [6, 9],
-    anchors: [
-      { days: [0, 1, 2, 3, 4], starts: [9.5, 10, 10.5], duration: 30, titles: ["FE 데일리 스크럼", "Platform Daily"], repeatEachDay: true },
-      { days: [3], starts: [12, 12.5], duration: 60, titles: ["Tech All-hands", "프론트엔드 챕터"] },
-    ],
-    pools: [
-      { days: [0, 1, 2, 3, 4], starts: [11, 12, 13, 14.5, 15.5, 16.5], durations: [30, 60, 90], titles: ["디자인 시스템 위클리", "제품 논의", "FE Sync", "개발 생산성 싱크", "QA", "릴리즈 점검", "플랫폼 위클리"] },
-      { days: [0, 2, 4], starts: [13, 14, 15], durations: [60, 120], titles: ["집중 개발", "리팩터링 블록", "기술 부채 정리"], type: "focus", movable: true },
-    ],
-    focusChance: 0.45,
-  },
-};
-
-function hashString(value) {
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function seededRandom(seed) {
-  let state = seed >>> 0;
-  return () => {
-    state += 0x6d2b79f5;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function pickWithRandom(list, random) {
-  return list[Math.floor(random() * list.length) % list.length];
-}
-
-function overlapsGenerated(items, day, start, duration) {
-  const end = start + duration / 60;
-  return items.some((item) => item.day === day && start < item.start + item.duration / 60 && item.start < end);
-}
-
-function buildWeekSchedule(person, week) {
-  const profile = ROLE_CALENDAR_PROFILES[person.role];
-  if (!profile) return [];
-  const random = seededRandom(hashString(`${person.id}:${person.name}:${person.role}:${week}`));
-  const schedule = [];
-  const addItem = (definition, force = false, fixedDay = null) => {
-    const day = fixedDay ?? pickWithRandom(definition.days, random);
-    let start = pickWithRandom(definition.starts, random);
-    const duration = definition.duration ?? pickWithRandom(definition.durations, random);
-    start += pickWithRandom([-0.5, 0, 0, 0.5], random);
-    start = Math.max(9, Math.min(19.5 - duration / 60, start));
-    if (!force && overlapsGenerated(schedule, day, start, duration)) return false;
-    schedule.push({
-      day, start, duration,
-      title: pickWithRandom(definition.titles, random),
-      type: definition.type && (!definition.typeChance || random() < definition.typeChance) ? definition.type : "meeting",
-      movable: definition.movable ?? false,
-    });
-    return true;
-  };
-
-  profile.anchors.forEach((anchor) => {
-    if (anchor.repeatEachDay) anchor.days.forEach((day) => addItem(anchor, false, day));
-    else addItem(anchor, false);
-  });
-  const [minCount, maxCount] = profile.weeklyRange;
-  const target = minCount + Math.floor(random() * (maxCount - minCount + 1));
-  let guard = 0;
-  while (schedule.length < target && guard < 120) {
-    guard += 1;
-    const pool = pickWithRandom(profile.pools, random);
-    addItem(pool, false);
-  }
-
-  if (random() < profile.focusChance && !schedule.some((item) => item.type === "focus")) {
-    const focusPools = profile.pools.filter((pool) => pool.type === "focus");
-    if (focusPools.length) addItem(pickWithRandom(focusPools, random), false);
-  }
-
-  // 개인별 리듬 차이: 일부는 점심/개인 일정, 일부는 오전 또는 늦은 오후 일정이 더 많음.
-  if (random() < 0.28) addItem({ days: [0, 1, 2, 3, 4], starts: [12, 12.5, 13], duration: 60, titles: ["팀 점심", "점심 약속"], type: "lunch" });
-  if (random() < 0.18) addItem({ days: [0, 1, 2, 3, 4], starts: [17.5, 18], duration: 60, titles: ["개인 일정", "운동"], type: "personal" });
-
-  return schedule.sort((a, b) => a.day - b.day || a.start - b.start);
-}
-
-function formatLocalDateTime(d) {
-  const p2 = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}:00`;
-}
-
-function makeDateTime(baseMonday, weekOffset, day, hour) {
-  const d = new Date(baseMonday);
-  d.setDate(d.getDate() + weekOffset * 7 + day);
-  d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
-  return d;
-}
-
-function generateRoleEventsForPerson(person) {
-  const baseMonday = new Date(2026, 6, 13);
-  const events = [];
-  for (let week = 0; week < 3; week += 1) {
-    const schedule = buildWeekSchedule(person, week);
-    schedule.forEach((item, index) => {
-      const start = makeDateTime(baseMonday, week, item.day, item.start);
-      const end = new Date(start.getTime() + item.duration * 60000);
-      events.push({
-        id: `role-${person.id}-${week}-${index}`,
-        title: item.title,
-        start: formatLocalDateTime(start), end: formatLocalDateTime(end),
-        visibility: "public", type: item.type || "meeting",
-        movable: item.movable ?? false, roleDemo: true,
-      });
-    });
-  }
-  return events;
-}
-
-function generateInitialEvents(people) {
-  return Object.fromEntries(people.map((person) => [person.id, generateRoleEventsForPerson(person)]));
-}
-
-const INITIAL_EVENTS = generateInitialEvents(PEOPLE_BASE);
-
-const ROOMS_BASE = [
-  { id: "r1", name: "5층 포커스룸", tower: "미르타워", floor: 5, capacity: 8 },
-  { id: "r2", name: "6층 라운지룸", tower: "미르타워", floor: 6, capacity: 6 },
-  { id: "r3", name: "7층 세미나룸", tower: "미르타워", floor: 7, capacity: 10 },
-  { id: "r4", name: "3층 미팅룸", tower: "solar타워", floor: 3, capacity: 6 },
-];
-const ROOM_EVENTS = {
-  r1: [],
-  r2: [
-    { id: "re2", start: "2026-07-15T14:30:00", end: "2026-07-15T16:30:00" },
-    { id: "re3", start: "2026-07-16T09:00:00", end: "2026-07-16T10:00:00" },
-  ],
-  r3: [{ id: "re4", start: "2026-07-14T13:00:00", end: "2026-07-14T15:00:00" }],
-};
-
-const PURPOSE_DEFAULT = "decision";
 const TYPE_LABEL = { meeting: "미팅", focus: "집중 근무", personal: "개인 일정", external: "외근", ooo: "휴가/OOO", lunch: "점심" };
-const WEEK_DAYS = ["2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17"];
 const DAY_LABEL = ["월", "화", "수", "목", "금"];
-const BIZ_START = 9;
-const BIZ_END = 19;
 const HOUR_HEIGHT = 72;
 
 /* ============================================================
@@ -378,7 +174,6 @@ const HOUR_HEIGHT = 72;
    ============================================================ */
 
 const toDate = (s) => new Date(s);
-const overlaps = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
 const addMin = (date, min) => new Date(date.getTime() + min * 60000);
 const pad2 = (n) => String(n).padStart(2, "0");
 const toLocalISO = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
@@ -415,246 +210,7 @@ const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
 const fmtDate = (d) => `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAY[d.getDay()]})`;
 
 /* ============================================================
-   3. SLOT GENERATION & CANDIDATE LOGIC (로직 동일, 이름만 새 id 사용)
-   ============================================================ */
-
-function generateSlots(request, companySettings) {
-  const cs = normalizeCompanySettings(companySettings);
-  const bizStart = cs.commuteIn, bizEnd = cs.commuteOut;
-  const slots = [];
-  const rangeStart = toDate(request.dateRangeStart);
-  const rangeEnd = toDate(request.dateRangeEnd);
-  let cursor = new Date(rangeStart);
-  cursor.setHours(Math.floor(bizStart), (bizStart % 1) * 60, 0, 0);
-  const lastDay = new Date(rangeEnd);
-  while (cursor <= lastDay) {
-    const day = cursor.getDay();
-    if (day !== 0 && day !== 6) {
-      for (let h = bizStart; h < bizEnd; h += 0.5) {
-        const slotStart = new Date(cursor);
-        slotStart.setHours(Math.floor(h), (h % 1) * 60, 0, 0);
-        const slotEnd = addMin(slotStart, request.durationMinutes);
-        const slotEndHour = slotEnd.getHours() + slotEnd.getMinutes() / 60;
-        if (slotEndHour <= bizEnd) slots.push({ start: slotStart, end: slotEnd });
-      }
-    }
-    cursor.setDate(cursor.getDate() + 1);
-    cursor.setHours(Math.floor(bizStart), (bizStart % 1) * 60, 0, 0);
-  }
-  return slots;
-}
-
-function getPersonStatus(personId, slotStart, slotEnd, events) {
-  const personEvents = events[personId] || [];
-  const conflicts = personEvents.filter((e) => overlaps(slotStart, slotEnd, toDate(e.start), toDate(e.end)));
-  if (conflicts.length === 0) return { state: "available", conflicts: [] };
-  const hardConflict = conflicts.find((e) => e.type === "external" || e.type === "ooo" || e.movable === false);
-  const movableConflict = conflicts.find((e) => e.movable === true);
-  if (hardConflict) return { state: "unavailable", conflicts, blocking: hardConflict };
-  if (movableConflict) return { state: "movable_conflict", conflicts, blocking: movableConflict };
-  return { state: "unavailable", conflicts, blocking: conflicts[0] };
-}
-function getAdjacentEvent(personId, slotStart, slotEnd, bufferMin, events) {
-  const personEvents = events[personId] || [];
-  const beforeWindowStart = addMin(slotStart, -bufferMin);
-  const afterWindowEnd = addMin(slotEnd, bufferMin);
-  return personEvents.find((e) => {
-    const es = toDate(e.start), ee = toDate(e.end);
-    return (ee <= slotStart && ee > beforeWindowStart) || (es >= slotEnd && es < afterWindowEnd);
-  });
-}
-function getAvailableRooms(slotStart, slotEnd, attendeeCount, roomPool) {
-  return (roomPool || ROOMS_BASE).filter((room) => {
-    if (room.capacity < attendeeCount) return false;
-    const roomEvents = ROOM_EVENTS[room.id] || [];
-    return !roomEvents.some((e) => overlaps(slotStart, slotEnd, toDate(e.start), toDate(e.end)));
-  });
-}
-function getCompanyBurden(slotStart, slotEnd, companySettings) {
-  const startH = slotStart.getHours() + slotStart.getMinutes() / 60;
-  const endH = slotEnd.getHours() + slotEnd.getMinutes() / 60;
-  const cs = normalizeCompanySettings(companySettings);
-  const commuteBufferHours = 1;
-  return {
-    duringLunch: startH < cs.lunchEnd && endH > cs.lunchStart, // 점심시간과 조금이라도 겹침
-    justArrived: startH >= cs.commuteIn && startH < cs.commuteIn + commuteBufferHours, // 출근 후 1시간 이내
-    beforeLeaving: endH > cs.commuteOut - commuteBufferHours && endH <= cs.commuteOut, // 퇴근 전 1시간 이내
-  };
-}
-function getDayMeetingCount(personId, date, events) {
-  const personEvents = events[personId] || [];
-  const dayKey = date.toDateString();
-  return personEvents.filter((e) => e.type !== "lunch" && toDate(e.start).toDateString() === dayKey).length;
-}
-
-function pickBestRoom(availableRooms, requiredIds, optionalIds, people) {
-  if (availableRooms.length === 0) return { room: undefined, crossTeam: false };
-  const organizer = people.find((p) => p.id === ME_ID);
-  const allAttendees = [...requiredIds, ...optionalIds].map((id) => people.find((p) => p.id === id)).filter(Boolean);
-  const otherTeamAttendees = allAttendees.filter((p) => p.team !== organizer?.team);
-  const crossTeam = otherTeamAttendees.length > 0;
-  const targetPeople = crossTeam ? otherTeamAttendees : allAttendees;
-  const scoreRoom = (room) => targetPeople.filter((p) => p.tower === room.tower && p.floor === room.floor).length * 2
-    + targetPeople.filter((p) => p.tower === room.tower).length;
-  const sorted = availableRooms.slice().sort((a, b) => {
-    const diff = scoreRoom(b) - scoreRoom(a);
-    if (diff !== 0) return diff;
-    return a.capacity - b.capacity;
-  });
-  return { room: sorted[0], crossTeam };
-}
-
-function evaluateSlot(slot, request, people, floorOf, events, companySettings, rooms) {
-  const { start, end } = slot;
-  const requiredIds = request.requiredIds;
-  const optionalIds = request.optionalIds;
-  const allIds = [...requiredIds, ...optionalIds];
-  const personStatuses = {};
-  allIds.forEach((id) => { personStatuses[id] = getPersonStatus(id, start, end, events); });
-
-  const requiredAvailable = requiredIds.filter((id) => personStatuses[id].state === "available");
-  const requiredMovable = requiredIds.filter((id) => personStatuses[id].state === "movable_conflict");
-  const requiredHardUnavailable = requiredIds.filter((id) => personStatuses[id].state === "unavailable");
-  const optionalAvailable = optionalIds.filter((id) => personStatuses[id].state === "available");
-  const optionalUnavailable = optionalIds.filter((id) => personStatuses[id].state !== "available");
-
-  const roomPool = request.forcedRoomId ? rooms.filter((r) => r.id === request.forcedRoomId) : rooms;
-  const availableRooms = request.requiredRoom ? getAvailableRooms(start, end, allIds.length, roomPool) : [];
-  const roomOk = !request.requiredRoom ? true : availableRooms.length > 0;
-  const checkpoints = [];
-
-  // 회사 공통 점심시간 · 출퇴근 시간 겹침 확인
-  const cb = getCompanyBurden(start, end, companySettings);
-  const anyBurden = cb.duringLunch || cb.justArrived || cb.beforeLeaving;
-  if (cb.duringLunch) checkpoints.push({ type: "soft_time", title: "회사 점심시간과 겹쳐요", description: "바로 깊은 논의에 들어가기 부담스러울 수 있어요." });
-  if (cb.justArrived) checkpoints.push({ type: "soft_time", title: "출근 직후 시간이에요", description: "회의 준비 시간이 부족할 수 있어요." });
-  if (cb.beforeLeaving) checkpoints.push({ type: "soft_time", title: "퇴근 직전 시간이에요", description: "논의가 길어질 경우 부담이 될 수 있어요." });
-
-  allIds.forEach((id) => {
-    if (personStatuses[id].state === "available") {
-      const adj = getAdjacentEvent(id, start, end, 30, events);
-      if (adj) {
-        const person = people.find((p) => p.id === id);
-        checkpoints.push({ type: "back_to_back_meeting", targetPersonId: id, title: `${person.name.slice(1)}님 연속 회의 후 참석`, description: "바로 논의에 참여할 수 있게 가까운 회의실로 잡아두었어요." });
-      }
-    }
-  });
-  optionalUnavailable.forEach((id) => {
-    const person = people.find((p) => p.id === id);
-    const isExternal = personStatuses[id].conflicts.some((e) => e.type === "external" || e.type === "ooo");
-    if (isExternal) checkpoints.push({ type: "external_day", targetPersonId: id, title: `${person.name.slice(1)}님 외근 있는 날`, description: "시간은 가능하지만, 참석이 어려울 수 있어요." });
-    else checkpoints.push({ type: "optional_unavailable", targetPersonId: id, title: `${person.name.slice(1)}님 겹치는 일정`, description: "회의에 참석하지 못할 경우, 회의록을 공유해 주세요." });
-  });
-  const tradeoffCopy = {
-    decision: "결정에 필요한 시간이라 조율을 요청드려도 좋아요.",
-    ideation: "이 시간 대신 다른 후보가 있다면 먼저 고려해보세요.",
-    discussion: "논의 참여를 위해 집중 시간 일부를 조정해야 해요.",
-    share_followup: "짧은 공유라면 이 시간도 괜찮아요.",
-  };
-  requiredMovable.forEach((id) => {
-    const person = people.find((p) => p.id === id);
-    const blockingType = personStatuses[id].blocking?.type;
-    const contextLabel = blockingType === "focus" ? "집중 근무 시간과" : "기존 일정과";
-    checkpoints.push({ type: "coordination_needed", targetPersonId: id, title: `${person.name.slice(1)}님 ${contextLabel} 겹쳐요`, description: tradeoffCopy[request.purpose] });
-  });
-  allIds.forEach((id) => {
-    if (personStatuses[id].state === "available") {
-      const dayCount = getDayMeetingCount(id, start, events);
-      if (dayCount >= 3) {
-        const person = people.find((p) => p.id === id);
-        checkpoints.push({ type: "fatigue", targetPersonId: id, title: `${person.name.slice(1)}님 오늘 미팅이 많은 날이에요`, description: "컨디션을 고려해서 조금 여유 있게 진행해도 좋아요." });
-      }
-    }
-  });
-
-  let status;
-  if (requiredHardUnavailable.length > 0) status = "not_recommended";
-  else if (requiredMovable.length > 0 || !roomOk) status = "needs_coordination";
-  else status = checkpoints.length > 0 ? "has_checkpoints" : "ready";
-
-  const bufferOkCount = allIds.filter((id) => personStatuses[id].state === "available" && !getAdjacentEvent(id, start, end, 30, events)).length;
-  const validationReasons = [];
-  if (requiredAvailable.length === requiredIds.length) validationReasons.push("필수 참석자 전원이 참석할 수 있어요.");
-  if (bufferOkCount >= Math.ceil(allIds.length * 0.6)) validationReasons.push("참석자 대부분에게 전후 30분 여유가 있어요.");
-  if (!anyBurden) validationReasons.push("점심 직후 · 퇴근 직전 시간을 피했어요.");
-  if (request.purpose === "decision" && requiredAvailable.length === requiredIds.length) validationReasons.push("결정에 필요한 참석자가 모두 가능한 시간이에요.");
-  if (request.purpose === "ideation" && optionalAvailable.length === optionalIds.length) validationReasons.push("아이디어 논의에 필요한 인원이 가장 많이 모일 수 있어요.");
-
-  const { room: defaultRoom, crossTeam } = request.requiredRoom
-    ? pickBestRoom(availableRooms, requiredIds, optionalIds, people)
-    : { room: undefined, crossTeam: false };
-  const roomReason = crossTeam ? "타 팀 참석자와 가까운 회의실이에요." : "참석자들이 이동하기 가까운 회의실이에요.";
-
-  return {
-    start, end, status, personStatuses, requiredRoom: request.requiredRoom,
-    requiredIds, optionalIds,
-    availableRooms, selectedRoom: defaultRoom, roomReason, validationReasons, checkpoints,
-    metrics: {
-      requiredAvailable: requiredAvailable.length / (requiredIds.length || 1),
-      roomAvailable: request.requiredRoom ? (availableRooms.length > 0 ? 1 : 0) : 1,
-      totalAvailable: (requiredAvailable.length + optionalAvailable.length) / (allIds.length || 1),
-      optionalAvailable: optionalIds.length ? optionalAvailable.length / optionalIds.length : 1,
-      roomCount: availableRooms.length,
-      burdenAvoided: !anyBurden ? 1 : 0,
-      bufferCount: bufferOkCount,
-    },
-  };
-}
-
-const STATUS_RANK = { ready: 0, has_checkpoints: 1, needs_coordination: 2, not_recommended: 3 };
-const PURPOSE_ORDER = {
-  decision: ["requiredAvailable", "roomAvailable", "totalAvailable", "burdenAvoided", "bufferCount"],
-  ideation: ["requiredAvailable", "totalAvailable", "optionalAvailable", "burdenAvoided", "roomAvailable", "bufferCount"],
-  discussion: ["requiredAvailable", "totalAvailable", "bufferCount", "burdenAvoided", "roomAvailable"],
-  share_followup: ["requiredAvailable", "burdenAvoided", "bufferCount", "totalAvailable", "roomAvailable"],
-};
-function sortCandidates(candidates, purpose) {
-  const order = PURPOSE_ORDER[purpose];
-  return candidates.slice().sort((a, b) => {
-    const rankDiff = STATUS_RANK[a.status] - STATUS_RANK[b.status];
-    if (rankDiff !== 0) return rankDiff;
-    for (const key of order) {
-      const diff = b.metrics[key] - a.metrics[key];
-      if (Math.abs(diff) > 1e-9) return diff;
-    }
-    return a.start - b.start;
-  });
-}
-function addComparativeReasons(finalCandidates) {
-  if (finalCandidates.length === 0) return finalCandidates;
-  const maxRoomCount = Math.max(...finalCandidates.map((c) => c.availableRooms.length));
-  const hasVariance = finalCandidates.some((c) => c.availableRooms.length < maxRoomCount);
-  const earliestReady = finalCandidates.find((c) => c.status === "ready" || c.status === "has_checkpoints");
-  return finalCandidates.map((c) => {
-    const reasons = [...c.validationReasons];
-    if (c.requiredRoom && c.availableRooms.length > 0) {
-      if (maxRoomCount >= 2 && hasVariance && c.availableRooms.length === maxRoomCount) reasons.push("다른 후보보다 회의실 선택지가 많아요.");
-      else if (c.availableRooms.length === 1) reasons.push("회의실을 예약할 수 있어요.");
-    }
-    if (earliestReady && c === earliestReady) reasons.push("가장 빠르게 확정할 수 있는 시간이에요.");
-    return { ...c, validationReasons: reasons };
-  });
-}
-function generateCandidates(request, people, events, companySettings, rooms) {
-  const floorOf = {};
-  people.forEach((p) => (floorOf[p.id] = p.floor));
-  const slots = generateSlots(request, companySettings);
-  const evaluated = slots.map((slot) => evaluateSlot(slot, request, people, floorOf, events, companySettings, rooms));
-  // 회사 점심시간은 선호도가 낮은 시간이 아니라 추천 대상에서 제외하는 공통 휴게시간으로 취급한다.
-  // 점심·출근 직후·퇴근 직전은 후보에서 제외하지 않는다.
-  // 대신 evaluateSlot에서 soft_time 체크포인트와 burdenAvoided 점수로 우선순위를 낮춘다.
-  const visible = evaluated.filter((c) => c.status !== "not_recommended");
-  const sorted = sortCandidates(visible, request.purpose);
-  const picked = [];
-  for (const c of sorted) {
-    if (!picked.some((p) => overlaps(c.start, c.end, p.start, p.end))) picked.push(c);
-    if (picked.length >= 3) break;
-  }
-  return addComparativeReasons(picked);
-}
-
-/* ============================================================
-   4. UI PRIMITIVES (Figma 토큰 그대로)
+   3. UI PRIMITIVES (Figma 토큰 그대로)
    ============================================================ */
 
 function Avatar({ person, size = 32 }) {
@@ -815,8 +371,27 @@ export default function MeetingSchedulerApp() {
       )}
 
       {showAdmin && (
-        <AdminPanel people={people} setPeople={setPeople} events={events} setEvents={setEvents} jobs={jobs} setJobs={setJobs} companySettings={companySettings} setCompanySettings={setCompanySettings}
-          rooms={rooms} setRooms={setRooms} teams={teams} setTeams={setTeams} onClose={() => setShowAdmin(false)} />
+        <AdminPanel
+          people={people}
+          setPeople={setPeople}
+          setEvents={setEvents}
+          jobs={jobs}
+          setJobs={setJobs}
+          companySettings={companySettings}
+          setCompanySettings={setCompanySettings}
+          rooms={rooms}
+          setRooms={setRooms}
+          teams={teams}
+          setTeams={setTeams}
+          towers={TOWERS}
+          meId={ME_ID}
+          colorPalette={COLOR_PALETTE}
+          icons={{ Trash2, Plus }}
+          Avatar={Avatar}
+          normalizeCompanySettings={normalizeCompanySettings}
+          timeStrToHour={timeStrToHour}
+          onClose={() => setShowAdmin(false)}
+        />
       )}
     </div>
   );
@@ -1093,19 +668,45 @@ const fieldButtonStyle = { height: 46, border: `1px solid ${C.border}`, borderRa
 function CreationWizard({ wizard, setWizard, people, jobs, events, companySettings, rooms, onClose, onConfirm, onQuickCreate }) {
   const [index, setIndex] = useState(0);
   const [loadingStep, setLoadingStep] = useState(0);
+  const [candidatesVisible, setCandidatesVisible] = useState(false);
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
   const [selectedRoomByCandidate, setSelectedRoomByCandidate] = useState({});
 
   const requiredIds = Object.keys(wizard.attendees).filter((id) => wizard.attendees[id] === "required");
   const optionalIds = Object.keys(wizard.attendees).filter((id) => wizard.attendees[id] === "optional");
 
-  const request = useMemo(() => ({
-    title: wizard.title || "새 회의", purpose: wizard.purpose, durationMinutes: wizard.durationMinutes,
-    dateRangeStart: WEEK_DAYS[0] + `T${hourToTimeStr(companySettings.commuteIn)}:00`, dateRangeEnd: WEEK_DAYS[4] + `T${hourToTimeStr(companySettings.commuteOut)}:00`,
-    requiredRoom: wizard.roomRequired !== false, forcedRoomId: wizard.forcedRoomId, requiredIds, optionalIds,
-  }), [wizard, requiredIds.join(","), optionalIds.join(",")]);
+  const normalizedCompanySettings = useMemo(
+    () => normalizeCompanySettings(companySettings),
+    [companySettings],
+  );
 
-  const candidates = useMemo(() => (wizard.step === 3 ? generateCandidates(request, people, events, companySettings, rooms) : []), [wizard.step, request, events, companySettings, rooms]);
+  const request = useMemo(
+    () => buildRecommendationRequest({
+      title: wizard.title,
+      description: wizard.description,
+      durationMinutes: wizard.durationMinutes,
+      weekDays: WEEK_DAYS,
+      companySettings: normalizedCompanySettings,
+      roomRequired: wizard.roomRequired !== false,
+      forcedRoomId: wizard.forcedRoomId,
+      requiredIds,
+      optionalIds,
+      people,
+      organizerId: ME_ID,
+    }),
+    [wizard.title, wizard.description, wizard.durationMinutes, wizard.roomRequired, wizard.forcedRoomId, requiredIds.join(","), optionalIds.join(","), normalizedCompanySettings, people],
+  );
+
+  const candidates = useMemo(
+    () => (wizard.step === 3
+      ? generateCandidates(request, people, events, normalizedCompanySettings, rooms, {
+        organizerId: ME_ID,
+        roomEvents: ROOM_EVENTS,
+        fallbackRooms: ROOMS_BASE,
+      })
+      : []),
+    [wizard.step, request, people, events, normalizedCompanySettings, rooms],
+  );
   const current = candidates[Math.min(index, Math.max(0, candidates.length - 1))];
   const currentKey = current ? `${current.start.getTime()}-${current.end.getTime()}` : "";
   const selectedRoomId = current ? (selectedRoomByCandidate[currentKey] || current.selectedRoom?.id) : undefined;
@@ -1118,23 +719,30 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
   const removeAttendee = (id) => setWizard((w) => { const next = { ...w.attendees }; delete next[id]; return { ...w, attendees: next }; });
   const toggleOptional = (id) => setWizard((w) => ({ ...w, attendees: { ...w.attendees, [id]: w.attendees[id] === "optional" ? "required" : "optional" } }));
 
-  const LOADING_CHECKS = wizard.roomRequired === false
-    ? ["필수 참석자 가능 일자 조회", "부담 시간대 확인"]
-    : ["필수 참석자 가능 일자 조회", "회의실 가능 여부 확인", "부담 시간대 확인"];
   const goToLoading = () => {
-    setWizard({ ...wizard, step: "loading" });
     setLoadingStep(0);
+    setIndex(0);
+    setCandidatesVisible(false);
+    setWizard({ ...wizard, step: "loading" });
   };
   React.useEffect(() => {
     if (wizard.step !== "loading") return;
-    if (loadingStep >= LOADING_CHECKS.length) {
-      const t = setTimeout(() => setWizard((w) => ({ ...w, step: 3 })), 350);
+    if (loadingStep >= AI_LOADING_STEP_COUNT) {
+      const t = setTimeout(() => setWizard((w) => ({ ...w, step: 3 })), AI_RESULTS_DELAY_MS);
       return () => clearTimeout(t);
     }
-    const t = setTimeout(() => setLoadingStep((s) => s + 1), 550);
+    const t = setTimeout(() => setLoadingStep((s) => s + 1), AI_STEP_DURATION_MS);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wizard.step, loadingStep]);
+
+  React.useEffect(() => {
+    if (wizard.step !== 3) {
+      setCandidatesVisible(false);
+      return;
+    }
+    const t = setTimeout(() => setCandidatesVisible(true), 40);
+    return () => clearTimeout(t);
+  }, [wizard.step]);
 
   React.useEffect(() => {
     if (wizard.step !== 3) return;
@@ -1181,9 +789,11 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
                   return (
                     <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <Avatar person={p} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{p.name}{p.id === ME_ID && <span style={{ color: C.ink500, fontWeight: 400 }}> · 주최자</span>}</div>
-                      </div>
+                      <PersonMeta
+                        name={`${p.name}${p.id === ME_ID ? " · 주최자" : ""}`}
+                        team={p.team}
+                        roleShort={resolveJobShort(jobs, p.role)}
+                      />
                       {p.id !== ME_ID && (
                         <>
                           <button onClick={() => toggleOptional(p.id)} style={{ display: "flex", alignItems: "center", gap: 4, border: "none", borderRadius: 8, height: 30, padding: "0 10px", background: C.bg2, color: isOptional ? C.blue : C.ink500, fontFamily: FONT, fontSize: 13, cursor: "pointer" }}>
@@ -1244,9 +854,11 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
                   return (
                     <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <Avatar person={p} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{p.name}{p.id === ME_ID && <span style={{ color: C.ink500, fontWeight: 400 }}> · 주최자</span>}</div>
-                      </div>
+                      <PersonMeta
+                        name={`${p.name}${p.id === ME_ID ? " · 주최자" : ""}`}
+                        team={p.team}
+                        roleShort={resolveJobShort(jobs, p.role)}
+                      />
                       {p.id !== ME_ID && (
                         <>
                           <button onClick={() => toggleOptional(p.id)} style={{ display: "flex", alignItems: "center", gap: 4, border: "none", borderRadius: 8, height: 30, padding: "0 10px", background: C.bg2, color: isOptional ? C.blue : C.ink500, fontFamily: FONT, fontSize: 13, cursor: "pointer" }}>
@@ -1352,13 +964,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
               return (
                 <div key={p.id} onClick={() => toggleAttendeeInSearch(p.id)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                   <Avatar person={p} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{p.name}</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
-                      <span style={{ fontFamily: FONT, fontSize: 13, color: C.ink500 }}>{p.team}</span>
-                      <span style={{ padding: "2px 7px", borderRadius: 999, background: C.bg2, color: C.ink800, fontFamily: FONT, fontSize: 11, fontWeight: 600 }}>{jobs.find((job) => job.name === p.role)?.short || p.role}</span>
-                    </div>
-                  </div>
+                  <PersonMeta name={p.name} team={p.team} roleShort={resolveJobShort(jobs, p.role)} />
                   {isAdded ? <CheckCircleFilled size={20} color="#22c55e" /> : <Circle size={20} color={C.border} />}
                 </div>
               );
@@ -1416,18 +1022,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
         <PanelHeader title={wizard.title} onClose={onClose} />
         <div style={{ padding: "10px 24px 40px 24px" }}>
           <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900, marginBottom: 20 }}>가능한 일정을 찾아볼게요</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {LOADING_CHECKS.map((label, i) => {
-              const state = i < loadingStep ? "done" : i === loadingStep ? "active" : "pending";
-              if (state === "pending") return null;
-              return (
-                <div key={label} style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: FONT, fontSize: 15, color: state === "done" ? C.ink500 : C.ink900 }}>
-                  {state === "done" ? <Check size={16} color="#22c55e" /> : <Spinner />}
-                  {label}
-                </div>
-              );
-            })}
-          </div>
+          <AiThinkingStepList loadingStep={loadingStep} Check={Check} Spinner={Spinner} />
         </div>
       </Overlay>
     );
@@ -1446,12 +1041,12 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
       </div>
       <div style={{ height: 1, background: C.bg2 }} />
       {candidates.length === 0 ? (
-        <div style={{ padding: 40, textAlign: "center", color: C.ink500, fontSize: 14 }}>조건에 맞는 후보를 찾지 못했어요. 조건을 수정해 주세요.</div>
+        <div style={{ padding: 40, textAlign: "center", color: C.ink500, fontSize: 14, opacity: candidatesVisible ? 1 : 0, transition: "opacity 0.35s ease" }}>조건에 맞는 후보를 찾지 못했어요. 조건을 수정해 주세요.</div>
       ) : (
-        <>
+        <div style={{ opacity: candidatesVisible ? 1 : 0, transition: "opacity 0.35s ease" }}>
           <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.blue }}>확정 가능 일정</span>
+              <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.blue }}>{current.profileLabel || "확정 가능 일정"}</span>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <button onClick={() => setIndex((i) => Math.max(0, i - 1))} disabled={index === 0} style={{ border: `1px solid ${C.border}`, borderRadius: 8, width: 32, height: 32, padding: 0, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "none", cursor: "pointer" }}><ChevronLeft size={18} color={C.ink900} /></button>
                 <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{index + 1} / {candidates.length}</span>
@@ -1495,7 +1090,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
           <div style={{ display: "flex", justifyContent: "flex-end", padding: "20px 24px 24px 24px", marginTop: "auto" }}>
             <PrimaryButton disabled={current.status === "not_recommended"} onClick={() => onConfirm(currentWithRoom, requiredIds, optionalIds, wizard.title)}>선택하기</PrimaryButton>
           </div>
-        </>
+        </div>
       )}
     </Overlay>
   );
@@ -1640,14 +1235,13 @@ function ConfirmedDetailModal({ data, people, onClose, onDelete, rsvp, setRsvp }
             <Plus size={16} color={C.ink900} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {meta.checkpoints.filter((c) => c.type !== "soft_time").map((c, i) => (
+            {meta.checkpoints.map((c, i) => (
               <label key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start", cursor: "pointer" }}>
                 <div onClick={() => toggleCheck(i)} style={{ width: 16, height: 16, border: `1px solid ${C.border}`, borderRadius: 4, marginTop: 1, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: checks[i] ? C.ink600 : "none" }}>
                   {checks[i] && <Check size={11} color={C.white} />}
                 </div>
                 <span style={{ fontFamily: FONT, fontSize: 15, color: checks[i] ? C.ink400 : C.ink900, textDecoration: checks[i] ? "line-through" : "none" }}>
-                  {c.type === "back_to_back_meeting" ? `${c.title.replace("연속 회의 후 참석", "")}에게 안건 미리 공유하기` :
-                   c.type === "optional_unavailable" || c.type === "external_day" ? `회의 후, ${c.title.split("님")[0]}님에게 회의록 보내기` : c.title}
+                  {c.description}
                 </span>
               </label>
             ))}
@@ -1657,98 +1251,3 @@ function ConfirmedDetailModal({ data, people, onClose, onDelete, rsvp, setRsvp }
     </Overlay>
   );
 }
-
-/* ---------- Admin panel: 구성원 관리 ---------- */
-
-const hourToTimeStr = (h) => `${pad2(Math.floor(h))}:${pad2(Math.round((h % 1) * 60))}`;
-const timeStrToHour = (str) => { const [h, m] = str.split(":").map(Number); return h + m / 60; };
-const adminInputStyle = { width: "100%", height: 38, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0 10px", fontFamily: FONT, fontSize: 14, boxSizing: "border-box" };
-const adminLabel = { fontFamily: FONT, fontSize: 12, color: C.ink500, marginBottom: 4 };
-
-function AdminPanel({ people, setPeople, events, setEvents, jobs, setJobs, companySettings, setCompanySettings, rooms, setRooms, teams, setTeams, onClose }) {
-  const [tab, setTab] = useState("company");
-  const updateCompanySetting = (field, rawValue) => {
-    const parsed = timeStrToHour(rawValue);
-    if (!Number.isFinite(parsed)) return;
-    setCompanySettings((current) => normalizeCompanySettings({ ...current, [field]: parsed }));
-  };
-  const updatePerson = (id, patch) => setPeople((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
-  const updatePersonRole = (person, role) => {
-    updatePerson(person.id, { role });
-    setEvents((prev) => ({
-      ...prev,
-      [person.id]: [
-        ...(prev[person.id] || []).filter((event) => !event.roleDemo),
-        ...generateRoleEventsForPerson({ ...person, role }),
-      ],
-    }));
-  };
-  const removePerson = (id) => { if (id === ME_ID) return; setPeople((prev) => prev.filter((p) => p.id !== id)); };
-  const addPerson = () => {
-    const color = COLOR_PALETTE[people.length % COLOR_PALETTE.length];
-    const person = { id: `p${Date.now()}`, name: "새 팀원", team: teams[0] || "", role: jobs[0]?.name || "", tower: TOWERS[0], floor: 5, avatarBg: color.avatarBg, avatarText: color.avatarText };
-    setPeople((prev) => [...prev, person]);
-    setEvents((prev) => ({ ...prev, [person.id]: generateRoleEventsForPerson(person) }));
-  };
-  const updateRoom = (id, patch) => setRooms((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  const removeRoom = (id) => setRooms((prev) => prev.filter((r) => r.id !== id));
-  const addRoom = () => setRooms((prev) => [...prev, { id: `r${Date.now()}`, name: "새 회의실", tower: TOWERS[0], floor: 1, capacity: 4 }]);
-  const updateTeam = (i, value) => setTeams((prev) => prev.map((t, idx) => (idx === i ? value : t)));
-  const removeTeam = (i) => setTeams((prev) => prev.filter((_, idx) => idx !== i));
-  const addTeam = () => setTeams((prev) => [...prev, "새 팀"]);
-  const updateJob = (id, patch) => setJobs((prev) => prev.map((job) => job.id === id ? { ...job, ...patch } : job));
-  const addJob = () => setJobs((prev) => [...prev, { id: `job-${Date.now()}`, name: "새 직무", short: "NEW" }]);
-  const removeJob = (id) => setJobs((prev) => prev.filter((job) => job.id !== id));
-
-  const cardStyle = { border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 };
-  return (
-    <Overlay onClose={onClose} width={680}>
-      <PanelHeader title="관리" onClose={onClose} />
-      <div style={{ display: "flex", gap: 8, padding: "0 24px 16px" }}>
-        {[['회사', 'company'], ['구성원', 'people']].map(([label, value]) => (
-          <button key={value} onClick={() => setTab(value)} style={{ flex: 1, height: 42, border: "none", borderRadius: 10, cursor: "pointer", fontFamily: FONT, fontSize: 15, fontWeight: 600, background: tab === value ? C.blue200 : C.bg2, color: tab === value ? C.blue : C.ink800 }}>{label}</button>
-        ))}
-      </div>
-      <div style={{ padding: "0 24px 24px", display: "flex", flexDirection: "column", gap: 16, maxHeight: "66vh", overflowY: "auto" }}>
-        {tab === "company" ? <>
-          <div style={cardStyle}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>회사 시간</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              {[['점심 시작','lunchStart'],['점심 종료','lunchEnd'],['출근 시간','commuteIn'],['퇴근 시간','commuteOut']].map(([label, field]) => <div key={field}><div style={adminLabel}>{label}</div><input type="time" value={hourToTimeStr(companySettings[field])} onChange={(e) => updateCompanySetting(field, e.target.value)} style={adminInputStyle} /></div>)}
-            </div>
-          </div>
-          <div style={cardStyle}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>직무</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {jobs.map((job) => <div key={job.id} style={{ display: "grid", gridTemplateColumns: "1fr 90px 32px", gap: 8 }}><input value={job.name} onChange={(e) => updateJob(job.id, { name: e.target.value })} style={adminInputStyle} /><input value={job.short} onChange={(e) => updateJob(job.id, { short: e.target.value.toUpperCase().slice(0, 5) })} style={adminInputStyle} /><button onClick={() => removeJob(job.id)} style={{ border: "none", background: "none", cursor: "pointer" }}><Trash2 size={16} color="#F95C5C" /></button></div>)}
-            </div>
-            <button onClick={addJob} style={{ ...SecondaryButtonStyle, width: "100%", marginTop: 8 }}><Plus size={15} /> 직무 추가</button>
-          </div>
-          <div style={cardStyle}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>팀</div>
-            {teams.map((team, i) => <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}><input value={team} onChange={(e) => updateTeam(i, e.target.value)} style={adminInputStyle} /><button onClick={() => removeTeam(i)} style={{ border: "none", background: "none", cursor: "pointer" }}><Trash2 size={16} color="#F95C5C" /></button></div>)}
-            <button onClick={addTeam} style={{ ...SecondaryButtonStyle, width: "100%" }}><Plus size={15} /> 팀 추가</button>
-          </div>
-          <div style={cardStyle}>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>회의실</div>
-            {rooms.map((r) => <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 56px 56px 32px", gap: 8, marginBottom: 8 }}><input value={r.name} onChange={(e) => updateRoom(r.id, { name: e.target.value })} style={adminInputStyle} /><select value={r.tower} onChange={(e) => updateRoom(r.id, { tower: e.target.value })} style={adminInputStyle}>{TOWERS.map(t => <option key={t}>{t}</option>)}</select><input type="number" value={r.floor} onChange={(e) => updateRoom(r.id, { floor: Number(e.target.value) })} style={adminInputStyle} /><input type="number" value={r.capacity} onChange={(e) => updateRoom(r.id, { capacity: Number(e.target.value) })} style={adminInputStyle} /><button onClick={() => removeRoom(r.id)} style={{ border: "none", background: "none", cursor: "pointer" }}><Trash2 size={16} color="#F95C5C" /></button></div>)}
-            <button onClick={addRoom} style={{ ...SecondaryButtonStyle, width: "100%" }}><Plus size={15} /> 회의실 추가</button>
-          </div>
-        </> : <>
-          {people.map((person) => <div key={person.id} style={cardStyle}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}><Avatar person={person} /><input value={person.name} onChange={(e) => updatePerson(person.id, { name: e.target.value })} style={{ ...adminInputStyle, flex: 1, fontWeight: 600 }} />{person.id !== ME_ID && <button onClick={() => removePerson(person.id)} style={{ border: "none", background: "none", cursor: "pointer" }}><Trash2 size={16} color="#F95C5C" /></button>}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <div><div style={adminLabel}>팀</div><select value={person.team} onChange={(e) => updatePerson(person.id, { team: e.target.value })} style={adminInputStyle}>{teams.map(t => <option key={t}>{t}</option>)}</select></div>
-              <div><div style={adminLabel}>직무</div><select value={person.role} onChange={(e) => updatePersonRole(person, e.target.value)} style={adminInputStyle}>{jobs.map(job => <option key={job.id} value={job.name}>{job.name} ({job.short})</option>)}</select></div>
-              <div><div style={adminLabel}>타워</div><select value={person.tower} onChange={(e) => updatePerson(person.id, { tower: e.target.value })} style={adminInputStyle}>{TOWERS.map(t => <option key={t}>{t}</option>)}</select></div>
-              <div><div style={adminLabel}>층</div><input type="number" value={person.floor} onChange={(e) => updatePerson(person.id, { floor: Number(e.target.value) })} style={adminInputStyle} /></div>
-            </div>
-          </div>)}
-          <button onClick={addPerson} style={{ ...SecondaryButtonStyle, width: "100%" }}><Plus size={15} /> 새 팀원 추가</button>
-        </>}
-      </div>
-    </Overlay>
-  );
-}
-
-const SecondaryButtonStyle = { padding: "13px 20px", background: "#F2F0E9", color: "#1C1C1A", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" };
