@@ -131,6 +131,20 @@ const PEOPLE_BASE = [
 ];
 const ME_ID = "yj";
 const DEFAULT_COMPANY_SETTINGS = { lunchStart: 13, lunchEnd: 14.25, commuteIn: 9, commuteOut: 19 };
+
+function normalizeCompanySettings(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const asHour = (candidate, fallback) => {
+    const number = Number(candidate);
+    return Number.isFinite(number) ? Math.min(24, Math.max(0, number)) : fallback;
+  };
+  return {
+    lunchStart: asHour(source.lunchStart, DEFAULT_COMPANY_SETTINGS.lunchStart),
+    lunchEnd: asHour(source.lunchEnd, DEFAULT_COMPANY_SETTINGS.lunchEnd),
+    commuteIn: asHour(source.commuteIn, DEFAULT_COMPANY_SETTINGS.commuteIn),
+    commuteOut: asHour(source.commuteOut, DEFAULT_COMPANY_SETTINGS.commuteOut),
+  };
+}
 const COLOR_PALETTE = [
   { avatarBg: "#e6ebfb", avatarText: "#48429f" }, { avatarBg: "#fceded", avatarText: "#b62c2c" },
   { avatarBg: "#e3f4f0", avatarText: "#0f766e" }, { avatarBg: "#fbf3d1", avatarText: "#ae5b1c" },
@@ -242,7 +256,7 @@ const fmtDate = (d) => `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAY[d.ge
    ============================================================ */
 
 function generateSlots(request, companySettings) {
-  const cs = companySettings || DEFAULT_COMPANY_SETTINGS;
+  const cs = normalizeCompanySettings(companySettings);
   const bizStart = cs.commuteIn, bizEnd = cs.commuteOut;
   const slots = [];
   const rangeStart = toDate(request.dateRangeStart);
@@ -296,7 +310,7 @@ function getAvailableRooms(slotStart, slotEnd, attendeeCount, roomPool) {
 function getCompanyBurden(slotStart, slotEnd, companySettings) {
   const startH = slotStart.getHours() + slotStart.getMinutes() / 60;
   const endH = slotEnd.getHours() + slotEnd.getMinutes() / 60;
-  const cs = companySettings || DEFAULT_COMPANY_SETTINGS;
+  const cs = normalizeCompanySettings(companySettings);
   const commuteBufferHours = 1;
   return {
     duringLunch: startH < cs.lunchEnd && endH > cs.lunchStart, // 점심시간과 조금이라도 겹침
@@ -543,7 +557,10 @@ export default function MeetingSchedulerApp() {
   const [weekStart, setWeekStart] = useState(mondayOf(new Date(2026, 6, 13)));
   const [rsvp, setRsvp] = usePersistentState(STORAGE_KEYS.rsvp, {}); // `${groupId}:${personId}` -> 'yes' | 'no'
   const [showAdmin, setShowAdmin] = useState(false);
-  const [companySettings, setCompanySettings] = usePersistentState(STORAGE_KEYS.companySettings, DEFAULT_COMPANY_SETTINGS);
+  const [companySettings, setCompanySettings] = usePersistentState(
+    STORAGE_KEYS.companySettings,
+    normalizeCompanySettings(readStored(STORAGE_KEYS.companySettings, DEFAULT_COMPANY_SETTINGS)),
+  );
   const [rooms, setRooms] = usePersistentState(STORAGE_KEYS.rooms, ROOMS_BASE);
   const [teams, setTeams] = usePersistentState(STORAGE_KEYS.teams, TEAMS_BASE);
 
@@ -1482,6 +1499,17 @@ const adminInputStyle = { width: "100%", height: 38, border: `1px solid ${C.bord
 const adminLabel = { fontFamily: FONT, fontSize: 12, color: C.ink500, marginBottom: 4 };
 
 function AdminPanel({ people, setPeople, companySettings, setCompanySettings, rooms, setRooms, teams, setTeams, onClose }) {
+  const updateCompanySetting = (field, rawValue) => {
+    const parsed = timeStrToHour(rawValue);
+    if (!Number.isFinite(parsed)) return;
+    setCompanySettings((current) => {
+      const normalized = normalizeCompanySettings(current);
+      const next = normalizeCompanySettings({ ...normalized, [field]: parsed });
+      // 입력 직후에도 저장해 새로고침 타이밍과 관계없이 유지한다.
+      writeStored(STORAGE_KEYS.companySettings, next);
+      return next;
+    });
+  };
   const updatePerson = (id, patch) => setPeople((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   const removePerson = (id) => { if (id === ME_ID) return; setPeople((prev) => prev.filter((p) => p.id !== id)); };
   const addPerson = () => {
@@ -1527,11 +1555,11 @@ function AdminPanel({ people, setPeople, companySettings, setCompanySettings, ro
           <div style={{ display: "flex", gap: 8 }}>
             <div style={{ flex: 1 }}>
               <div style={adminLabel}>출근 시간</div>
-              <input type="time" value={hourToTimeStr(companySettings.commuteIn)} onChange={(e) => setCompanySettings((c) => ({ ...c, commuteIn: timeStrToHour(e.target.value) }))} style={adminInputStyle} />
+              <input type="time" value={hourToTimeStr(companySettings.commuteIn)} onInput={(e) => updateCompanySetting("commuteIn", e.currentTarget.value)} onChange={(e) => updateCompanySetting("commuteIn", e.currentTarget.value)} style={adminInputStyle} />
             </div>
             <div style={{ flex: 1 }}>
               <div style={adminLabel}>퇴근 시간</div>
-              <input type="time" value={hourToTimeStr(companySettings.commuteOut)} onChange={(e) => setCompanySettings((c) => ({ ...c, commuteOut: timeStrToHour(e.target.value) }))} style={adminInputStyle} />
+              <input type="time" value={hourToTimeStr(companySettings.commuteOut)} onInput={(e) => updateCompanySetting("commuteOut", e.currentTarget.value)} onChange={(e) => updateCompanySetting("commuteOut", e.currentTarget.value)} style={adminInputStyle} />
             </div>
           </div>
           <div style={{ fontSize: 12, color: C.ink500, marginTop: 8 }}>회사 전체에 적용되는 공통 설정이에요. 캘린더 표시와 회의 후보 계산에 바로 반영돼요.</div>
