@@ -1,26 +1,40 @@
 import React, { useState, useMemo } from "react";
-import arrowLeftIcon from "./assets/icons/icon-arrow-left-small-mono.svg";
-import arrowRightIcon from "./assets/icons/icon-arrow-right-small-mono.svg";
-import closeIcon from "./assets/icons/icon-x-mono.svg";
-import plusIcon from "./assets/icons/icon-plus-mono.svg";
-import searchIcon from "./assets/icons/icon-search-mono.svg";
-import checkIcon from "./assets/icons/icon-check-mono.svg";
-import calendarIcon from "./assets/icons/icon-calendar-check-mono.svg";
-import clockIcon from "./assets/icons/icon-clock-mono.svg";
-import pinIcon from "./assets/icons/icon-pin-location-mono.svg";
-import binIcon from "./assets/icons/icon-bin-mono.svg";
-import circleIcon from "./assets/icons/icon-circle-empty-mono.svg";
-import checkCircleIcon from "./assets/icons/icon-check-circle-line-mono.svg";
-import pencilIcon from "./assets/icons/icon-pencil-mono.svg";
-import settingIcon from "./assets/icons/icon-setting-mono.svg";
+import arrowLeftIcon from "./assets/icons/icon-arrow-left-small-mono.svg?raw";
+import arrowRightIcon from "./assets/icons/icon-arrow-right-small-mono.svg?raw";
+import closeIcon from "./assets/icons/icon-x-mono.svg?raw";
+import plusIcon from "./assets/icons/icon-plus-mono.svg?raw";
+import searchIcon from "./assets/icons/icon-search-mono.svg?raw";
+import checkIcon from "./assets/icons/icon-check-mono.svg?raw";
+import calendarIcon from "./assets/icons/icon-calendar-check-mono.svg?raw";
+import clockIcon from "./assets/icons/icon-clock-mono.svg?raw";
+import pinIcon from "./assets/icons/icon-pin-location-mono.svg?raw";
+import binIcon from "./assets/icons/icon-bin-mono.svg?raw";
+import circleIcon from "./assets/icons/icon-circle-empty-mono.svg?raw";
+import checkCircleIcon from "./assets/icons/icon-check-circle-line-mono.svg?raw";
+import pencilIcon from "./assets/icons/icon-pencil-mono.svg?raw";
+import settingIcon from "./assets/icons/icon-setting-mono.svg?raw";
 
 const ICONS = {
   ChevronLeft: arrowLeftIcon, ChevronRight: arrowRightIcon, X: closeIcon, Plus: plusIcon, Search: searchIcon, Check: checkIcon,
   CalendarCheck2: calendarIcon, Clock: clockIcon, MapPin: pinIcon, Trash2: binIcon, Circle: circleIcon,
   CheckCircle2: checkCircleIcon, Pencil: pencilIcon, Settings: settingIcon,
 };
+const normalizeSvg = (svg) => svg
+  .replace(/width="[^"]*"/i, 'width="100%"')
+  .replace(/height="[^"]*"/i, 'height="100%"')
+  .replace(/fill="(?!none)[^"]*"/gi, 'fill="currentColor"')
+  .replace(/stroke="(?!none)[^"]*"/gi, 'stroke="currentColor"');
+
 function SvgIcon({ name, size = 24, color = "currentColor", style, ...props }) {
-  return <span aria-hidden="true" {...props} style={{ width: size, height: size, display: "inline-block", flexShrink: 0, backgroundColor: color, WebkitMask: `url(${ICONS[name]}) center / contain no-repeat`, mask: `url(${ICONS[name]}) center / contain no-repeat`, ...style }} />;
+  const svg = ICONS[name];
+  return (
+    <span
+      aria-hidden="true"
+      {...props}
+      style={{ width: size, height: size, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color, lineHeight: 0, ...style }}
+      dangerouslySetInnerHTML={{ __html: normalizeSvg(svg) }}
+    />
+  );
 }
 const ChevronLeft = (p) => <SvgIcon name="ChevronLeft" {...p} />;
 const ChevronRight = (p) => <SvgIcon name="ChevronRight" {...p} />;
