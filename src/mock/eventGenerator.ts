@@ -1,7 +1,13 @@
 import { buildOneOnOneTitle, personFirstName, pickPeerName } from "./anonymizedNames";
 import { COMMON_EVENT_BLOCKS } from "./commonEvents";
+import {
+  COMMUTE_BUFFER_HOURS,
+  DEFAULT_COMPANY_SETTINGS,
+  type CompanyScheduleSettings,
+} from "./companyDefaults";
 import { getRoleTemplate } from "./roleTemplates";
 import type {
+  DemoRoom,
   DraftScheduleItem,
   GeneratedCalendarEvent,
   MockPerson,
@@ -15,8 +21,65 @@ import type {
 export const MOCK_BASE_MONDAY = new Date(2026, 6, 13);
 export const MOCK_WEEK_COUNT = 3;
 
-const BIZ_START = 9;
-const BIZ_END = 19.5;
+const MIN_EVENT_DURATION_MIN = 30;
+const TIME_SNAP_MIN = 10;
+
+type GeneratorBounds = {
+  lunchStart: number;
+  lunchEnd: number;
+  bizEnd: number;
+  commuteOutBandStart: number;
+  earliestEventStart: number;
+};
+
+function createGeneratorBounds(settings: CompanyScheduleSettings): GeneratorBounds {
+  return {
+    lunchStart: settings.lunchStart,
+    lunchEnd: settings.lunchEnd,
+    bizEnd: settings.commuteOut,
+    commuteOutBandStart: settings.commuteOut,
+    earliestEventStart: settings.commuteIn + COMMUTE_BUFFER_HOURS,
+  };
+}
+
+let generatorBounds = createGeneratorBounds(DEFAULT_COMPANY_SETTINGS);
+
+export function configureEventGenerator(settings: CompanyScheduleSettings) {
+  generatorBounds = createGeneratorBounds(settings);
+}
+
+function snapDurationMinutes(minutes: number) {
+  return Math.max(MIN_EVENT_DURATION_MIN, Math.round(minutes / TIME_SNAP_MIN) * TIME_SNAP_MIN);
+}
+
+function snapStartHour(hour: number) {
+  const totalMin = Math.round(hour * 60);
+  return Math.round(totalMin / TIME_SNAP_MIN) * TIME_SNAP_MIN / 60;
+}
+
+function clampScheduleStart(start: number, durationMinutes: number) {
+  const maxStart = generatorBounds.bizEnd - durationMinutes / 60;
+  return snapStartHour(Math.min(maxStart, start));
+}
+
+function sanitizeScheduleItem(item: DraftScheduleItem): DraftScheduleItem | null {
+  const duration = snapDurationMinutes(item.duration);
+  const start = clampScheduleStart(item.start, duration);
+  if (start < generatorBounds.earliestEventStart) return null;
+  if (overlapsReservedCompanyTime(start, duration)) return null;
+  return { ...item, start, duration };
+}
+
+/** 회사 점심·출근·퇴근 시간대와 겹치지 않는지 (관리 탭 회사 설정 기준) */
+function overlapsReservedCompanyTime(start: number, durationMinutes: number) {
+  const { lunchStart, lunchEnd, bizEnd, commuteOutBandStart, earliestEventStart } = generatorBounds;
+  const end = start + durationMinutes / 60;
+  if (start < earliestEventStart) return true;
+  if (start < lunchEnd && end > lunchStart) return true;
+  if (start < bizEnd && end > commuteOutBandStart) return true;
+  if (end > bizEnd) return true;
+  return false;
+}
 
 const WEEK_COUNT_MODIFIERS = [
   { countScale: 1, focusBoost: 0, externalBoost: 0, oneOnOneBoost: 0 },
@@ -66,7 +129,13 @@ function pickWeightedBlock(blocks: ScheduleBlock[], random: RandomFn, traits: Pe
 
 function overlapsGenerated(items: DraftScheduleItem[], day: number, start: number, duration: number) {
   const end = start + duration / 60;
-  return items.some((item) => item.day === day && start < item.start + item.duration / 60 && item.start < end);
+  const gap = 5 / 60;
+  return items.some(
+    (item) =>
+      item.day === day &&
+      start < item.start + item.duration / 60 + gap &&
+      item.start < end + gap,
+  );
 }
 
 function shiftDay(day: number, shift: number) {
@@ -87,8 +156,6 @@ function resolveTitle(
     const peer = pickPeerName([self], random);
     return buildOneOnOneTitle(self, peer);
   }
-  if (mode === "designPrefix") return `[D] ${base}`;
-  if (mode === "productPrefix") return `[P] ${base}`;
   return base;
 }
 
@@ -99,11 +166,19 @@ function applyPersonStartOffset(
   duration: number,
   skipJitter: boolean,
 ) {
-  if (skipJitter) return Math.max(BIZ_START, Math.min(BIZ_END - duration / 60, start + traits.startOffset * 0.3));
+  const maxStart = generatorBounds.bizEnd - duration / 60;
+  if (skipJitter) {
+    const adjusted = start + traits.startOffset * 0.3;
+    const snapped = snapStartHour(adjusted);
+    if (snapped < generatorBounds.earliestEventStart || snapped > maxStart) return null;
+    return snapped;
+  }
   const jitter = pickWithRandom([-0.5, 0, 0, 0.25, 0.5], random);
   const morningAdjust = traits.morningPerson ? -0.25 : 0.25;
   const adjusted = start + traits.startOffset + jitter + morningAdjust;
-  return Math.max(BIZ_START, Math.min(BIZ_END - duration / 60, adjusted));
+  const snapped = snapStartHour(adjusted);
+  if (snapped < generatorBounds.earliestEventStart || snapped > maxStart) return null;
+  return snapped;
 }
 
 function pickPersonDay(block: ScheduleBlock, random: RandomFn, traits: PersonCalendarTraits, fixedDay?: number) {
@@ -124,13 +199,15 @@ function pickPersonDay(block: ScheduleBlock, random: RandomFn, traits: PersonCal
 
 function pickPersonStart(block: ScheduleBlock, random: RandomFn, traits: PersonCalendarTraits) {
   if (block.category === "daily" && !block.skipJitter) return traits.dailyHour;
-  if (block.starts.length === 1) return block.starts[0];
-  return pickWithRandom(block.starts, random);
+  const eligibleStarts = block.starts.filter((hour) => hour >= generatorBounds.earliestEventStart);
+  if (eligibleStarts.length === 0) return generatorBounds.earliestEventStart;
+  if (eligibleStarts.length === 1) return eligibleStarts[0];
+  return pickWithRandom(eligibleStarts, random);
 }
 
 function pickPersonDuration(block: ScheduleBlock, random: RandomFn, traits: PersonCalendarTraits) {
-  const durations = block.durations.map((d) => Math.max(15, d + traits.durationBias));
-  return pickWithRandom(durations, random);
+  const durations = block.durations.map((d) => Math.max(MIN_EVENT_DURATION_MIN, d + traits.durationBias));
+  return snapDurationMinutes(pickWithRandom(durations, random));
 }
 
 function blockActiveThisWeek(block: ScheduleBlock, week: number) {
@@ -162,7 +239,7 @@ export function derivePersonTraits(person: MockPerson): PersonCalendarTraits {
     oneOnOneAffinity: person.role === "Product Manager" ? 0.65 + random() * 0.35 : random() * 0.6,
     externalAffinity: random() * roleExternalBoost,
     dayWeights: Array.from({ length: 5 }, () => 0.35 + random() * 1.1),
-    dailyHour: 9 + Math.floor(random() * 4) * 0.5,
+    dailyHour: generatorBounds.earliestEventStart + Math.floor(random() * 3) * 0.5,
     weeklyDayShift: Math.floor(random() * 3) - 1,
     durationBias: Math.floor(random() * 5) * 10 - 20,
     poolWeights: {
@@ -208,9 +285,22 @@ function addScheduleItem(
   const day = pickPersonDay(block, random, traits, fixedDay);
   const duration = pickPersonDuration(block, random, traits);
   const rawStart = fixedStart ?? pickPersonStart(block, random, traits);
-  const start = applyPersonStartOffset(rawStart, traits, random, duration, block.skipJitter ?? false);
+  let start: number | null;
+  if (fixedStart != null) {
+    const snapped = snapStartHour(fixedStart);
+    start = snapped >= generatorBounds.earliestEventStart && snapped <= generatorBounds.bizEnd - duration / 60 ? snapped : null;
+  } else {
+    start = applyPersonStartOffset(rawStart, traits, random, duration, block.skipJitter ?? false);
+  }
+  if (start == null || start < generatorBounds.earliestEventStart) return false;
+
+  if (!force && block.category === "oneOnOne") {
+    const dayCount = schedule.filter((item) => item.day === day && item.category === "oneOnOne").length;
+    if (dayCount >= 3) return false;
+  }
 
   if (!force && overlapsGenerated(schedule, day, start, duration)) return false;
+  if (overlapsReservedCompanyTime(start, duration)) return false;
 
   schedule.push({
     day,
@@ -257,23 +347,22 @@ function injectFragmentedOneOnOnes(
     id: "fragmented-1on1",
     category: "oneOnOne",
     days: [0, 1, 2, 3, 4],
-    starts: [13, 13.5, 14, 14.5, 15, 15.5, 16, 16.5, 17],
-    durations: [25, 30],
+    starts: [14.5, 15.25, 16, 16.75],
+    durations: [30],
     titles: ["1:1"],
     titleMode: "oneOnOne",
+    skipJitter: true,
   };
 
   for (let day = 0; day < 5; day += 1) {
     const shiftedDay = shiftDay(day, traits.weeklyDayShift);
-    const count = range[0] + Math.floor(random() * (range[1] - range[0] + 1));
+    const count = Math.min(range[0] + Math.floor(random() * (range[1] - range[0] + 1)), 2);
     let placed = 0;
-    let guard = 0;
-    while (placed < count && guard < 30) {
-      guard += 1;
-      const start = pickWithRandom(oneOnOneBlock.starts, random);
-      if (
-        addScheduleItem(schedule, oneOnOneBlock, person, random, traits, false, shiftedDay, start)
-      ) placed += 1;
+    for (const start of oneOnOneBlock.starts) {
+      if (placed >= count) break;
+      if (addScheduleItem(schedule, oneOnOneBlock, person, random, traits, false, shiftedDay, start)) {
+        placed += 1;
+      }
     }
   }
 }
@@ -336,11 +425,8 @@ export function buildWeekSchedule(person: MockPerson, week: number, traits?: Per
   fulfillMinPerWeek(schedule, template.pools, person, week, random, personTraits);
 
   if (template.fragmentedOneOnOnePerDay) {
-    const boost = weekMod.oneOnOneBoost ?? 0;
     const [lo, hi] = template.fragmentedOneOnOnePerDay;
-    const adjLo = Math.max(1, lo + Math.round(boost * 2));
-    const adjHi = Math.max(adjLo, hi + Math.round(boost * 2));
-    injectFragmentedOneOnOnes(schedule, person, week, random, personTraits, [adjLo, adjHi]);
+    injectFragmentedOneOnOnes(schedule, person, week, random, personTraits, [lo, hi]);
   }
 
   const focusChance = Math.min(
@@ -359,8 +445,8 @@ export function buildWeekSchedule(person: MockPerson, week: number, traits?: Per
         id: "extra-lunch",
         category: "lunch",
         days: [0, 1, 2, 3, 4],
-        starts: [12, 12.5, 13],
-        durations: [60, 90],
+        starts: [12, 12.5],
+        durations: [30, 60],
         titles: ["점심먹어요🍓", "조별 랜덤런치!", "런치 해요 🍚"],
         type: "lunch",
       },
@@ -377,8 +463,8 @@ export function buildWeekSchedule(person: MockPerson, week: number, traits?: Per
         id: "extra-personal",
         category: "personal",
         days: [0, 1, 2, 3, 4],
-        starts: [17.5, 18, 18.5],
-        durations: [60, 90],
+        starts: [16, 16.5, 17],
+        durations: [30, 60],
         titles: ["개인 일정", "개인 운동", "바쁨"],
         type: "personal",
       },
@@ -393,7 +479,22 @@ export function buildWeekSchedule(person: MockPerson, week: number, traits?: Per
     if (externalPools.length) addScheduleItem(schedule, pickWithRandom(externalPools, random), person, random, personTraits);
   }
 
-  return schedule.sort((a, b) => a.day - b.day || a.start - b.start);
+  return dedupeSchedule(
+    schedule
+      .map((item) => sanitizeScheduleItem(item))
+      .filter((item): item is DraftScheduleItem => item != null)
+      .sort((a, b) => a.day - b.day || a.start - b.start),
+  );
+}
+
+function dedupeSchedule(schedule: DraftScheduleItem[]) {
+  const seen = new Set<string>();
+  return schedule.filter((item) => {
+    const key = `${item.day}|${item.start.toFixed(3)}|${item.duration}|${item.title}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function formatLocalDateTime(d: Date) {
@@ -402,9 +503,10 @@ function formatLocalDateTime(d: Date) {
 }
 
 function makeDateTime(baseMonday: Date, weekOffset: number, day: number, hour: number) {
+  const snappedHour = snapStartHour(Math.min(generatorBounds.bizEnd, hour));
   const d = new Date(baseMonday);
   d.setDate(d.getDate() + weekOffset * 7 + day);
-  d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
+  d.setHours(Math.floor(snappedHour), Math.round((snappedHour % 1) * 60), 0, 0);
   return d;
 }
 
@@ -418,7 +520,7 @@ export function generateRoleEventsForPerson(person: MockPerson): GeneratedCalend
     const schedule = buildWeekSchedule(person, week, traits);
     schedule.forEach((item, index) => {
       const start = makeDateTime(baseMonday, week, item.day, item.start);
-      const end = new Date(start.getTime() + item.duration * 60000);
+      const end = new Date(start.getTime() + snapDurationMinutes(item.duration) * 60000);
       events.push({
         id: `role-${person.id}-w${week}-${index}-${hashString(`${item.title}-${item.start}`) % 100000}`,
         title: item.title,
@@ -435,6 +537,225 @@ export function generateRoleEventsForPerson(person: MockPerson): GeneratedCalend
   return events;
 }
 
-export function generateInitialEvents(people: MockPerson[]) {
+export function generateInitialEvents(
+  people: MockPerson[],
+  companySettings: CompanyScheduleSettings = DEFAULT_COMPANY_SETTINGS,
+) {
+  configureEventGenerator(companySettings);
   return Object.fromEntries(people.map((person) => [person.id, generateRoleEventsForPerson(person)]));
+}
+
+function hasTimeOverlap(events: GeneratedCalendarEvent[], start: string, end: string) {
+  const startMs = new Date(start).getTime();
+  const endMs = new Date(end).getTime();
+  return events.some((ev) => {
+    const evStart = new Date(ev.start).getTime();
+    const evEnd = new Date(ev.end).getTime();
+    return startMs < evEnd && endMs > evStart;
+  });
+}
+
+function pickRoomForPerson(person: MockPerson, rooms: DemoRoom[], seed: number): DemoRoom {
+  const sameTower = rooms.filter((r) => r.tower === person.tower);
+  const pool = sameTower.length > 0 ? sameTower : rooms;
+  const sameFloor = pool.filter((r) => r.floor === person.floor);
+  const candidates = sameFloor.length > 0 && seed % 10 < 7 ? sameFloor : pool;
+  return candidates[seed % candidates.length] ?? rooms[0];
+}
+
+function assignDemoRooms(
+  eventsByPerson: Record<string, GeneratedCalendarEvent[]>,
+  people: MockPerson[],
+  rooms: DemoRoom[],
+) {
+  if (rooms.length === 0) return;
+
+  const personById = Object.fromEntries(people.map((p) => [p.id, p]));
+  for (const [personId, personEvents] of Object.entries(eventsByPerson)) {
+    const person = personById[personId];
+    if (!person) continue;
+
+    for (const ev of personEvents) {
+      if (ev.type !== "meeting" || ev.room) continue;
+      const roll = hashString(`${ev.id}:room`) % 100;
+      if (roll >= 85) continue;
+      ev.room = pickRoomForPerson(person, rooms, hashString(`${ev.id}:${personId}`) % 1000);
+    }
+  }
+}
+
+/** 확정 미팅(groupId) + 참석자 메타 — 1:1은 solo movable, 팀 미팅은 다중 참석자 */
+function injectDemoGroupMeetings(
+  eventsByPerson: Record<string, GeneratedCalendarEvent[]>,
+  people: MockPerson[],
+  meId: string,
+  rooms: DemoRoom[],
+): { events: Record<string, GeneratedCalendarEvent[]>; rsvp: Record<string, "yes" | "no"> } {
+  const rsvp: Record<string, "yes" | "no"> = {};
+  const personById = Object.fromEntries(people.map((p) => [p.id, p]));
+  let groupIndex = 0;
+
+  const applyMeetingMeta = (event: GeneratedCalendarEvent, attendeeIds: string[]) => {
+    const host = personById[attendeeIds[0]];
+    const room = event.room ?? (host && rooms.length > 0
+      ? pickRoomForPerson(host, rooms, hashString(`${event.groupId}:room`) % 1000)
+      : undefined);
+    if (room) event.room = room;
+    event.meetingMeta = {
+      requiredIds: attendeeIds,
+      optionalIds: [],
+      room,
+      checkpoints: [],
+      start: event.start,
+      end: event.end,
+    };
+  };
+
+  const isOneOnOneMeeting = (title: string) => title.includes("1:1");
+
+  const isTeamMeetingTitle = (title: string) => (
+    /스크럼|Daily|싱크|플래닝|회의|리뷰|킥오프|얼라인|미팅|캘리브레이션/i.test(title)
+    && !isOneOnOneMeeting(title)
+  );
+
+  const teammatesFor = (personId: string, count: number) => {
+    const person = personById[personId];
+    if (!person) return [];
+    return people
+      .filter((p) => p.id !== personId && p.team === person.team)
+      .map((p) => ({ id: p.id, sort: hashString(`${personId}:${p.id}`) % 1000 }))
+      .sort((a, b) => a.sort - b.sort)
+      .slice(0, count)
+      .map((item) => item.id);
+  };
+
+  const attachGroupMeeting = (
+    hostId: string,
+    sourceEvent: GeneratedCalendarEvent,
+    mateIds: string[],
+  ) => {
+    const groupId = `demo-mtg-${groupIndex++}`;
+    sourceEvent.groupId = groupId;
+    const attendeeIds = [hostId, ...mateIds];
+    applyMeetingMeta(sourceEvent, attendeeIds);
+
+    for (const mateId of mateIds) {
+      const mateEvents = eventsByPerson[mateId] ?? [];
+      if (hasTimeOverlap(mateEvents, sourceEvent.start, sourceEvent.end)) continue;
+      eventsByPerson[mateId] = [
+        ...mateEvents,
+        {
+          ...sourceEvent,
+          id: `${groupId}-${mateId}`,
+          groupId,
+          roleDemo: true,
+        },
+      ];
+      const mateEv = eventsByPerson[mateId].find((item) => item.groupId === groupId);
+      if (mateEv) applyMeetingMeta(mateEv, attendeeIds);
+
+      const mateRsvpRoll = hashString(`${groupId}:${mateId}`) % 100;
+      if (mateRsvpRoll >= 78) {
+        rsvp[`${groupId}:${mateId}`] = mateRsvpRoll >= 92 ? "no" : "yes";
+      }
+    }
+
+    const hostRsvpRoll = hashString(`${groupId}:${hostId}`) % 100;
+    if (hostRsvpRoll >= 75) {
+      rsvp[`${groupId}:${hostId}`] = hostRsvpRoll >= 90 ? "no" : "yes";
+    }
+  };
+
+  // 1) 1:1 → solo 참석자 메타 + movable
+  for (const [personId, personEvents] of Object.entries(eventsByPerson)) {
+    for (const ev of personEvents) {
+      if (ev.type !== "meeting" || ev.groupId) continue;
+      if (!isOneOnOneMeeting(ev.title)) continue;
+      ev.movable = true;
+      applyMeetingMeta(ev, [personId]);
+    }
+  }
+
+  // 2) 팀 미팅 → 같은 팀 2~4명 groupId 공유
+  for (const [personId, personEvents] of Object.entries(eventsByPerson)) {
+    for (const ev of personEvents) {
+      if (ev.type !== "meeting" || ev.groupId) continue;
+      if (!isTeamMeetingTitle(ev.title)) continue;
+
+      const roll = hashString(`${ev.id}:${ev.start}:group`) % 100;
+      if (roll >= 72) continue;
+
+      const mateCount = 2 + (roll % 2);
+      const mates = teammatesFor(personId, mateCount).filter((mateId) => {
+        const mateEvents = eventsByPerson[mateId] ?? [];
+        return !hasTimeOverlap(mateEvents, ev.start, ev.end);
+      });
+      if (mates.length === 0) continue;
+
+      attachGroupMeeting(personId, ev, mates);
+    }
+  }
+
+  // 3) 데모 주 고정 팀 미팅 (다음 주 월~수)
+  const anchorMeetings = [
+    {
+      title: "사업실 주간 싱크",
+      start: "2026-07-14T14:00:00",
+      end: "2026-07-14T15:00:00",
+      team: "사업실",
+      hosts: ["yc", "yj", "sm", "ky"],
+    },
+    {
+      title: "플랫폼팀 스프린트 리뷰",
+      start: "2026-07-15T15:00:00",
+      end: "2026-07-15T16:00:00",
+      team: "플랫폼팀",
+      hosts: ["dw", "jh", "hr"],
+    },
+    {
+      title: "그로스팀 KPI 리뷰",
+      start: "2026-07-16T11:00:00",
+      end: "2026-07-16T12:00:00",
+      team: "그로스팀",
+      hosts: ["kj", "ys"],
+    },
+  ];
+
+  for (const anchor of anchorMeetings) {
+    const attendeeIds = anchor.hosts.filter((id) => personById[id]);
+    if (attendeeIds.length < 2) continue;
+
+    const groupId = `demo-mtg-${groupIndex++}`;
+    for (const personId of attendeeIds) {
+      const personEvents = eventsByPerson[personId] ?? [];
+      if (hasTimeOverlap(personEvents, anchor.start, anchor.end)) continue;
+
+      const ev: GeneratedCalendarEvent = {
+        id: `${groupId}-${personId}`,
+        title: anchor.title,
+        start: anchor.start,
+        end: anchor.end,
+        visibility: "public",
+        type: "meeting",
+        movable: false,
+        groupId,
+        roleDemo: true,
+      };
+      eventsByPerson[personId] = [...personEvents, ev];
+      applyMeetingMeta(ev, attendeeIds);
+    }
+  }
+
+  return { events: eventsByPerson, rsvp };
+}
+
+export function generateInitialEventsAndRsvp(
+  people: MockPerson[],
+  companySettings: CompanyScheduleSettings = DEFAULT_COMPANY_SETTINGS,
+  meId = "yj",
+  rooms: DemoRoom[] = [],
+) {
+  const events = generateInitialEvents(people, companySettings);
+  assignDemoRooms(events, people, rooms);
+  return injectDemoGroupMeetings(events, people, meId, rooms);
 }
