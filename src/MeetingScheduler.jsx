@@ -11,13 +11,14 @@ import pinIcon from "./assets/icons/icon-pin-location-mono.svg?raw";
 import binIcon from "./assets/icons/icon-bin-mono.svg?raw";
 import circleIcon from "./assets/icons/icon-circle-empty-mono.svg?raw";
 import checkCircleIcon from "./assets/icons/icon-check-circle-line-mono.svg?raw";
+import checkCircleFilledIcon from "./assets/icons/icon-check-circle-mono.svg?raw";
 import pencilIcon from "./assets/icons/icon-pencil-mono.svg?raw";
 import settingIcon from "./assets/icons/icon-setting-mono.svg?raw";
 
 const ICONS = {
   ChevronLeft: arrowLeftIcon, ChevronRight: arrowRightIcon, X: closeIcon, Plus: plusIcon, Search: searchIcon, Check: checkIcon,
   CalendarCheck2: calendarIcon, Clock: clockIcon, MapPin: pinIcon, Trash2: binIcon, Circle: circleIcon,
-  CheckCircle2: checkCircleIcon, Pencil: pencilIcon, Settings: settingIcon,
+  CheckCircle2: checkCircleIcon, CheckCircleFilled: checkCircleFilledIcon, Pencil: pencilIcon, Settings: settingIcon,
 };
 const normalizeSvg = (svg) => svg
   .replace(/width="[^"]*"/i, 'width="100%"')
@@ -48,6 +49,7 @@ const MapPin = (p) => <SvgIcon name="MapPin" {...p} />;
 const Trash2 = (p) => <SvgIcon name="Trash2" {...p} />;
 const Circle = (p) => <SvgIcon name="Circle" {...p} />;
 const CheckCircle2 = (p) => <SvgIcon name="CheckCircle2" {...p} />;
+const CheckCircleFilled = (p) => <SvgIcon name="CheckCircleFilled" {...p} />;
 const Pencil = (p) => <SvgIcon name="Pencil" {...p} />;
 const Settings = (p) => <SvgIcon name="Settings" {...p} />;
 
@@ -300,7 +302,7 @@ function evaluateSlot(slot, request, people, floorOf, events, companySettings, r
   const optionalUnavailable = optionalIds.filter((id) => personStatuses[id].state !== "available");
 
   const roomPool = request.forcedRoomId ? rooms.filter((r) => r.id === request.forcedRoomId) : rooms;
-  const availableRooms = request.requiredRoom ? getAvailableRooms(start, end, allIds.length, roomPool) : roomPool;
+  const availableRooms = request.requiredRoom ? getAvailableRooms(start, end, allIds.length, roomPool) : [];
   const roomOk = !request.requiredRoom ? true : availableRooms.length > 0;
   const checkpoints = [];
 
@@ -361,16 +363,18 @@ function evaluateSlot(slot, request, people, floorOf, events, companySettings, r
   if (request.purpose === "decision" && requiredAvailable.length === requiredIds.length) validationReasons.push("결정에 필요한 참석자가 모두 가능한 시간이에요.");
   if (request.purpose === "ideation" && optionalAvailable.length === optionalIds.length) validationReasons.push("아이디어 논의에 필요한 인원이 가장 많이 모일 수 있어요.");
 
-  const { room: defaultRoom, crossTeam } = pickBestRoom(availableRooms, requiredIds, optionalIds, people);
+  const { room: defaultRoom, crossTeam } = request.requiredRoom
+    ? pickBestRoom(availableRooms, requiredIds, optionalIds, people)
+    : { room: undefined, crossTeam: false };
   const roomReason = crossTeam ? "타 팀 참석자와 가까운 회의실이에요." : "참석자들이 이동하기 가까운 회의실이에요.";
 
   return {
-    start, end, status, personStatuses,
+    start, end, status, personStatuses, requiredRoom: request.requiredRoom,
     requiredIds, optionalIds,
     availableRooms, selectedRoom: defaultRoom, roomReason, validationReasons, checkpoints,
     metrics: {
       requiredAvailable: requiredAvailable.length / (requiredIds.length || 1),
-      roomAvailable: availableRooms.length > 0 ? 1 : 0,
+      roomAvailable: request.requiredRoom ? (availableRooms.length > 0 ? 1 : 0) : 1,
       totalAvailable: (requiredAvailable.length + optionalAvailable.length) / (allIds.length || 1),
       optionalAvailable: optionalIds.length ? optionalAvailable.length / optionalIds.length : 1,
       roomCount: availableRooms.length,
@@ -406,7 +410,7 @@ function addComparativeReasons(finalCandidates) {
   const earliestReady = finalCandidates.find((c) => c.status === "ready" || c.status === "has_checkpoints");
   return finalCandidates.map((c) => {
     const reasons = [...c.validationReasons];
-    if (c.availableRooms.length > 0) {
+    if (c.requiredRoom && c.availableRooms.length > 0) {
       if (maxRoomCount >= 2 && hasVariance && c.availableRooms.length === maxRoomCount) reasons.push("다른 후보보다 회의실 선택지가 많아요.");
       else if (c.availableRooms.length === 1) reasons.push("회의실을 예약할 수 있어요.");
     }
@@ -484,7 +488,7 @@ function Toggle({ options, value, onChange }) {
    5. APP
    ============================================================ */
 
-const EMPTY_WIZARD = { step: "base", title: "", dateStr: "2026-07-12", startHour: 10, durationMinutes: 60, forcedRoomId: null, purpose: PURPOSE_DEFAULT, attendees: { yj: "required" }, search: "" };
+const EMPTY_WIZARD = { step: "base", title: "", dateStr: "2026-07-12", startHour: 10, endHour: 11, durationMinutes: 60, roomRequired: true, forcedRoomId: null, purpose: PURPOSE_DEFAULT, attendees: { yj: "required" }, search: "" };
 
 export default function MeetingSchedulerApp() {
   const [people, setPeople] = useState(PEOPLE_BASE);
@@ -872,7 +876,7 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
 
   const request = useMemo(() => ({
     title: wizard.title || "새 회의", purpose: wizard.purpose, durationMinutes: wizard.durationMinutes,
-    dateRangeStart: WEEK_DAYS[0] + "T09:00:00", dateRangeEnd: WEEK_DAYS[4] + "T19:00:00",
+    dateRangeStart: WEEK_DAYS[0] + `T${hourToTimeStr(companySettings.commuteIn)}:00`, dateRangeEnd: WEEK_DAYS[4] + `T${hourToTimeStr(companySettings.commuteOut)}:00`,
     requiredRoom: wizard.roomRequired !== false, forcedRoomId: wizard.forcedRoomId, requiredIds, optionalIds,
   }), [wizard, requiredIds.join(","), optionalIds.join(",")]);
 
@@ -883,7 +887,9 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
   const removeAttendee = (id) => setWizard((w) => { const next = { ...w.attendees }; delete next[id]; return { ...w, attendees: next }; });
   const toggleOptional = (id) => setWizard((w) => ({ ...w, attendees: { ...w.attendees, [id]: w.attendees[id] === "optional" ? "required" : "optional" } }));
 
-  const LOADING_CHECKS = ["필수 참석자 가능 일자 조회", "회의실 가능 여부 확인", "부담 시간대 확인"];
+  const LOADING_CHECKS = wizard.roomRequired === false
+    ? ["필수 참석자 가능 일자 조회", "부담 시간대 확인"]
+    : ["필수 참석자 가능 일자 조회", "회의실 가능 여부 확인", "부담 시간대 확인"];
   const goToLoading = () => {
     setWizard({ ...wizard, step: "loading" });
     setLoadingStep(0);
@@ -937,9 +943,33 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
               <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: selectedPeople.length > 1 ? C.black : C.ink500, flex: 1, textAlign: "left" }}>참석자 찾기</span>
               <Search size={18} color={C.ink500} />
             </button>
+            {selectedPeople.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 16 }}>
+                {selectedPeople.map((p) => {
+                  const isOptional = wizard.attendees[p.id] === "optional";
+                  return (
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <Avatar person={p} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{p.name}{p.id === ME_ID && <span style={{ color: C.ink500, fontWeight: 400 }}> · 주최자</span>}</div>
+                      </div>
+                      {p.id !== ME_ID && (
+                        <>
+                          <button onClick={() => toggleOptional(p.id)} style={{ display: "flex", alignItems: "center", gap: 4, border: "none", borderRadius: 8, height: 30, padding: "0 10px", background: C.bg2, color: isOptional ? C.blue : C.ink500, fontFamily: FONT, fontSize: 13, cursor: "pointer" }}>
+                            {isOptional ? <CheckCircleFilled size={14} color={C.blue} /> : <Circle size={14} color={C.ink500} />}
+                            선택 참여
+                          </button>
+                          <button onClick={() => removeAttendee(p.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}><X size={14} color={C.ink500} /></button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Field>
           <Field label="시간">
-            <Toggle options={[["1시간", 60], ["30분", 30], ["직접 선택", "custom"]]} value={wizard.durationMinutes} onChange={(v) => v === "custom" ? setWizard({ ...wizard, step: "datetime" }) : setWizard({ ...wizard, durationMinutes: v })} />
+            <Toggle options={[["1시간", 60], ["30분", 30], ["직접 선택", "custom"]]} value={wizard.durationMinutes} onChange={(v) => v === "custom" ? setWizard({ ...wizard, endHour: wizard.startHour + wizard.durationMinutes / 60, step: "datetime" }) : setWizard({ ...wizard, durationMinutes: v, endHour: wizard.startHour + v / 60 })} />
           </Field>
           <Field label="회의실">
             <Toggle options={[["필요", true], ["필요없음", false]]} value={roomRequired} onChange={(v) => setWizard({ ...wizard, roomRequired: v, forcedRoomId: v ? wizard.forcedRoomId : null })} />
@@ -989,7 +1019,7 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
                       {p.id !== ME_ID && (
                         <>
                           <button onClick={() => toggleOptional(p.id)} style={{ display: "flex", alignItems: "center", gap: 4, border: "none", borderRadius: 8, height: 30, padding: "0 10px", background: C.bg2, color: isOptional ? C.blue : C.ink500, fontFamily: FONT, fontSize: 13, cursor: "pointer" }}>
-                            {isOptional ? <CheckCircle2 size={14} color={C.blue} /> : <Circle size={14} color={C.ink500} />}
+                            {isOptional ? <CheckCircleFilled size={14} color={C.blue} /> : <Circle size={14} color={C.ink500} />}
                             선택 참여
                           </button>
                           <button onClick={() => removeAttendee(p.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
@@ -1021,20 +1051,41 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
   }
 
   if (wizard.step === "datetime") {
+    const endHour = wizard.endHour ?? (wizard.startHour + wizard.durationMinutes / 60);
+    const updateStart = (value) => {
+      const nextStart = timeStrToHour(value);
+      const minEnd = nextStart + 0.5;
+      const nextEnd = Math.max(endHour, minEnd);
+      setWizard({ ...wizard, startHour: nextStart, endHour: nextEnd, durationMinutes: Math.round((nextEnd - nextStart) * 60) });
+    };
+    const updateEnd = (value) => {
+      const nextEnd = timeStrToHour(value);
+      const safeEnd = Math.max(nextEnd, wizard.startHour + 0.5);
+      setWizard({ ...wizard, endHour: safeEnd, durationMinutes: Math.round((safeEnd - wizard.startHour) * 60) });
+    };
+    const inputWrap = { ...fieldButtonStyle, padding: "0 12px", cursor: "text" };
+    const inputInner = { border: "none", outline: "none", background: "transparent", color: C.black, fontFamily: FONT, fontWeight: 500, fontSize: 17, width: "100%" };
     return (
       <Overlay onClose={onClose} minHeight={560}>
         <PanelHeader title="언제로 할까요?" onClose={onClose} />
         <div style={{ padding: "10px 24px", display: "flex", flexDirection: "column", gap: 24 }}>
           <Field label="날짜">
-            <input type="date" value={wizard.dateStr} onChange={(e) => setWizard({ ...wizard, dateStr: e.target.value })}
-              style={{ ...fieldButtonStyle, color: C.black, cursor: "text" }} />
+            <div style={inputWrap}>
+              <CalendarCheck2 size={20} color={C.ink900} />
+              <input type="date" value={wizard.dateStr} onChange={(e) => setWizard({ ...wizard, dateStr: e.target.value })} style={inputInner} />
+            </div>
           </Field>
           <Field label="시작 시간">
-            <input type="time" value={hourToTimeStr(wizard.startHour)} onChange={(e) => setWizard({ ...wizard, startHour: timeStrToHour(e.target.value) })}
-              style={{ ...fieldButtonStyle, color: C.black, cursor: "text" }} />
+            <div style={inputWrap}>
+              <Clock size={20} color={C.ink900} />
+              <input type="time" value={hourToTimeStr(wizard.startHour)} onChange={(e) => updateStart(e.target.value)} style={inputInner} />
+            </div>
           </Field>
-          <Field label="시간">
-            <Toggle options={[["1시간", 60], ["30분", 30]]} value={wizard.durationMinutes} onChange={(v) => setWizard({ ...wizard, durationMinutes: v })} />
+          <Field label="종료 시간">
+            <div style={inputWrap}>
+              <Clock size={20} color={C.ink900} />
+              <input type="time" value={hourToTimeStr(endHour)} min={hourToTimeStr(wizard.startHour + 0.5)} onChange={(e) => updateEnd(e.target.value)} style={inputInner} />
+            </div>
           </Field>
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "20px 24px 24px 24px", marginTop: "auto" }}>
@@ -1074,7 +1125,7 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
                     <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{p.name}</div>
                     <div style={{ fontFamily: FONT, fontSize: 13, color: C.ink500 }}>{p.team} · {p.role}</div>
                   </div>
-                  {isAdded ? <CheckCircle2 size={20} color="#22c55e" /> : <Circle size={20} color={C.border} />}
+                  {isAdded ? <CheckCircleFilled size={20} color="#22c55e" /> : <Circle size={20} color={C.border} />}
                 </div>
               );
             })}
@@ -1112,7 +1163,7 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
                   <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{roomLabel(r)}</div>
                   <div style={{ fontFamily: FONT, fontSize: 13, color: C.ink500 }}>{r.capacity}인 수용</div>
                 </div>
-                {isSelected ? <CheckCircle2 size={18} color={C.blue} /> : <Circle size={18} color={C.border} />}
+                {isSelected ? <CheckCircleFilled size={18} color={C.blue} /> : <Circle size={18} color={C.border} />}
               </div>
             );
           })}
@@ -1205,7 +1256,7 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
             </div>
           )}
 
-          <RoomPicker current={current} />
+          {current.requiredRoom && <RoomPicker current={current} />}
 
           <div style={{ display: "flex", justifyContent: "flex-end", padding: "20px 24px 24px 24px", marginTop: "auto" }}>
             <PrimaryButton disabled={current.status === "not_recommended"} onClick={() => onConfirm(current, requiredIds, optionalIds, wizard.title)}>선택하기</PrimaryButton>
