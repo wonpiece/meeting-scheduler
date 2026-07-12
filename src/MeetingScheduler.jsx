@@ -76,8 +76,9 @@ const C = {
 const FONT = "'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const STORAGE_KEYS = {
-  people: "meeting-scheduler:people",
-  events: "meeting-scheduler:events",
+  people: "meeting-scheduler:people-v2",
+  events: "meeting-scheduler:events-v2",
+  jobs: "meeting-scheduler:jobs",
   companySettings: "meeting-scheduler:company-settings",
   rooms: "meeting-scheduler:rooms",
   teams: "meeting-scheduler:teams",
@@ -121,13 +122,22 @@ function usePersistentState(key, fallback) {
 const TEAMS_BASE = ["사업실", "플랫폼팀", "그로스팀", "경영지원실"];
 const TOWERS = ["미르타워", "solar타워"];
 
+const JOBS_BASE = [
+  { id: "pm", name: "Product Manager", short: "PM" },
+  { id: "pd", name: "Product Designer", short: "PD" },
+  { id: "om", name: "Operations Manager", short: "OM" },
+  { id: "fe", name: "Frontend", short: "FE" },
+  { id: "be", name: "Backend", short: "BE" },
+  { id: "bdm", name: "Business Development Manager", short: "BDM" },
+];
+
 const PEOPLE_BASE = [
-  { id: "yj", name: "김지원", team: "사업실", role: "프로덕트 디자이너", tower: "미르타워", floor: 5, avatarBg: "#e6ebfb", avatarText: "#48429f" },
-  { id: "ky", name: "강유정", team: "사업실", role: "백엔드 엔지니어", tower: "미르타워", floor: 6, avatarBg: "#fceded", avatarText: "#b62c2c" },
-  { id: "sm", name: "신미르", team: "사업실", role: "프론트엔드 엔지니어", tower: "미르타워", floor: 6, avatarBg: "#e3f4f0", avatarText: "#0f766e" },
-  { id: "yc", name: "이예찬", team: "사업실", role: "프로덕트 매니저", tower: "미르타워", floor: 5, avatarBg: "#fbf3d1", avatarText: "#ae5b1c" },
-  { id: "kj", name: "김정민", team: "그로스팀", role: "Business Developer", tower: "solar타워", floor: 3, avatarBg: "#eef8d9", avatarText: "#4d7c0f" },
-  { id: "ys", name: "염은솔", team: "그로스팀", role: "오퍼레이션 매니저", tower: "solar타워", floor: 3, avatarBg: "#f3ebfc", avatarText: "#7f31c2" },
+  { id: "yj", name: "김지원", team: "사업실", role: "Product Designer", tower: "미르타워", floor: 5, avatarBg: "#e6ebfb", avatarText: "#48429f" },
+  { id: "ky", name: "강유정", team: "사업실", role: "Backend", tower: "미르타워", floor: 6, avatarBg: "#fceded", avatarText: "#b62c2c" },
+  { id: "sm", name: "신미르", team: "사업실", role: "Frontend", tower: "미르타워", floor: 6, avatarBg: "#e3f4f0", avatarText: "#0f766e" },
+  { id: "yc", name: "이예찬", team: "사업실", role: "Product Manager", tower: "미르타워", floor: 5, avatarBg: "#fbf3d1", avatarText: "#ae5b1c" },
+  { id: "kj", name: "김정민", team: "그로스팀", role: "Business Development Manager", tower: "solar타워", floor: 3, avatarBg: "#eef8d9", avatarText: "#4d7c0f" },
+  { id: "ys", name: "염은솔", team: "그로스팀", role: "Operations Manager", tower: "solar타워", floor: 3, avatarBg: "#f3ebfc", avatarText: "#7f31c2" },
 ];
 const ME_ID = "yj";
 const DEFAULT_COMPANY_SETTINGS = { lunchStart: 13, lunchEnd: 14.25, commuteIn: 9, commuteOut: 19 };
@@ -152,40 +162,91 @@ const COLOR_PALETTE = [
   { avatarBg: "#e0f2fe", avatarText: "#0369a1" }, { avatarBg: "#fee2e2", avatarText: "#b91c1c" },
 ];
 
-const INITIAL_EVENTS = {
-  yj: [
-    { id: "e1", title: "위클리 플래닝", start: "2026-07-13T10:00:00", end: "2026-07-13T11:00:00", visibility: "public", type: "meeting", movable: false },
-    { id: "e1b", title: "팀 리더 싱크", start: "2026-07-13T13:00:00", end: "2026-07-13T14:00:00", visibility: "public", type: "meeting", movable: false },
-    { id: "e1c", title: "채용 인터뷰", start: "2026-07-13T16:00:00", end: "2026-07-13T17:00:00", visibility: "private", type: "meeting", movable: false },
-    { id: "e2", title: "점심", start: "2026-07-14T12:00:00", end: "2026-07-14T13:00:00", visibility: "private", type: "lunch", movable: false },
-    { id: "e3", title: "임원 보고", start: "2026-07-16T09:00:00", end: "2026-07-16T09:30:00", visibility: "public", type: "meeting", movable: false },
+const ROLE_EVENT_TEMPLATES = {
+  "Product Manager": [
+    { day: 0, start: 10, duration: 60, title: "주간 목표 점검" },
+    { day: 1, start: 14, duration: 60, title: "OKR 싱크" },
+    { day: 2, start: 15.5, duration: 30, title: "리더 1:1" },
+    { day: 3, start: 11, duration: 60, title: "제품 의사결정" },
+    { day: 4, start: 16, duration: 60, title: "P&L 리뷰" },
   ],
-  ky: [
-    { id: "e4a", title: "스탠드업", start: "2026-07-15T09:00:00", end: "2026-07-15T09:30:00", visibility: "public", type: "meeting", movable: false },
-    { id: "e4b", title: "코드 리뷰", start: "2026-07-15T10:00:00", end: "2026-07-15T10:30:00", visibility: "public", type: "meeting", movable: false },
-    { id: "e4c", title: "PR 논의", start: "2026-07-15T13:00:00", end: "2026-07-15T13:30:00", visibility: "public", type: "meeting", movable: false },
-    { id: "e5", title: "집중 근무", start: "2026-07-14T11:00:00", end: "2026-07-14T13:00:00", visibility: "public", type: "focus", movable: true },
-    { id: "e6", title: "배포 점검", start: "2026-07-16T16:30:00", end: "2026-07-16T17:30:00", visibility: "public", type: "meeting", movable: false },
+  "Product Designer": [
+    { day: 0, start: 11, duration: 60, title: "디자인 코어 위클리" },
+    { day: 1, start: 15, duration: 60, title: "UX 리뷰" },
+    { day: 2, start: 14, duration: 60, title: "디자인 시스템 위클리" },
+    { day: 3, start: 10.5, duration: 30, title: "메이커 디자인 리뷰" },
+    { day: 4, start: 15.5, duration: 60, title: "페어 디자인 리뷰" },
   ],
-  sm: [
-    { id: "e7", title: "디자인 QA", start: "2026-07-13T15:30:00", end: "2026-07-13T16:30:00", visibility: "public", type: "meeting", movable: false },
-    { id: "e8", title: "개인 일정", start: "2026-07-17T09:00:00", end: "2026-07-17T10:00:00", visibility: "private", type: "personal", movable: false },
+  "Frontend": [
+    { day: 0, start: 9.5, duration: 30, title: "FE 데일리 스크럼" },
+    { day: 1, start: 9.5, duration: 30, title: "FE 데일리 스크럼" },
+    { day: 2, start: 9.5, duration: 30, title: "FE 데일리 스크럼" },
+    { day: 3, start: 10, duration: 60, title: "Tech All-hands" },
+    { day: 4, start: 14, duration: 60, title: "디자인 시스템 위클리" },
   ],
-  yc: [
-    { id: "e9x", title: "스프린트 리뷰", start: "2026-07-15T14:00:00", end: "2026-07-15T15:00:00", visibility: "public", type: "meeting", movable: false },
-    { id: "e9", title: "리서치 정리", start: "2026-07-14T09:00:00", end: "2026-07-14T10:30:00", visibility: "public", type: "focus", movable: true },
-    { id: "e10", title: "타 팀 미팅", start: "2026-07-16T13:30:00", end: "2026-07-16T14:30:00", visibility: "public", type: "meeting", movable: false },
+  "Backend": [
+    { day: 0, start: 10, duration: 30, title: "BE 데일리 스크럼" },
+    { day: 1, start: 10, duration: 30, title: "BE 데일리 스크럼" },
+    { day: 2, start: 13, duration: 180, title: "NMD 집중 블록", type: "focus", movable: true },
+    { day: 3, start: 10, duration: 60, title: "Tech All-hands" },
+    { day: 4, start: 15, duration: 60, title: "시스템 디자인 스터디" },
   ],
-  kj: [
-    { id: "e14", title: "파트너사 외근", start: "2026-07-15T09:00:00", end: "2026-07-15T18:00:00", visibility: "public", type: "external", movable: false },
-    { id: "e15", title: "영업 미팅", start: "2026-07-16T10:00:00", end: "2026-07-16T11:00:00", visibility: "public", type: "meeting", movable: false },
+  "Business Development Manager": [
+    { day: 0, start: 11.5, duration: 60, title: "파트너 위클리" },
+    { day: 1, start: 12, duration: 90, title: "파트너 점심 미팅", type: "external" },
+    { day: 2, start: 15, duration: 60, title: "크로스팀 프로젝트 싱크" },
+    { day: 3, start: 10.5, duration: 90, title: "외부 파트너 미팅", type: "external" },
+    { day: 4, start: 16, duration: 30, title: "사업 지표 리뷰" },
   ],
-  ys: [
-    { id: "e11", title: "픽업 운영 점검", start: "2026-07-15T15:00:00", end: "2026-07-15T15:30:00", visibility: "public", type: "meeting", movable: false },
-    { id: "e12", title: "운영 이슈 대응", start: "2026-07-14T10:00:00", end: "2026-07-14T11:30:00", visibility: "private", type: "meeting", movable: false },
-    { id: "e13", title: "OOO", start: "2026-07-17T09:00:00", end: "2026-07-17T19:00:00", visibility: "public", type: "ooo", movable: false },
+  "Operations Manager": [
+    { day: 0, start: 9, duration: 30, title: "운영 현황 체크" },
+    { day: 0, start: 14, duration: 60, title: "운영 스크럼" },
+    { day: 1, start: 10.5, duration: 60, title: "문의 자동답변 Scrum" },
+    { day: 2, start: 9, duration: 30, title: "체커 관리 daily" },
+    { day: 2, start: 15, duration: 90, title: "운영 정기 회의" },
+    { day: 3, start: 11, duration: 60, title: "Search Product & Ops Weekly" },
+    { day: 4, start: 14, duration: 60, title: "운영 개선 미팅" },
   ],
 };
+
+function formatLocalDateTime(d) {
+  const p2 = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}:00`;
+}
+
+function makeDateTime(baseMonday, weekOffset, day, hour) {
+  const d = new Date(baseMonday);
+  d.setDate(d.getDate() + weekOffset * 7 + day);
+  d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
+  return d;
+}
+
+function generateRoleEventsForPerson(person) {
+  const templates = ROLE_EVENT_TEMPLATES[person.role] || [];
+  const baseMonday = new Date(2026, 6, 13);
+  const events = [];
+  for (let week = 0; week < 3; week += 1) {
+    templates.forEach((item, index) => {
+      const jitter = ((person.id.charCodeAt(0) + index + week) % 2) * 0.5;
+      const start = makeDateTime(baseMonday, week, item.day, item.start + jitter);
+      const end = new Date(start.getTime() + item.duration * 60000);
+      events.push({
+        id: `role-${person.id}-${week}-${index}`,
+        title: item.title,
+        start: formatLocalDateTime(start), end: formatLocalDateTime(end),
+        visibility: "public", type: item.type || "meeting",
+        movable: item.movable ?? false, roleDemo: true,
+      });
+    });
+  }
+  return events;
+}
+
+function generateInitialEvents(people) {
+  return Object.fromEntries(people.map((person) => [person.id, generateRoleEventsForPerson(person)]));
+}
+
+const INITIAL_EVENTS = generateInitialEvents(PEOPLE_BASE);
 
 const ROOMS_BASE = [
   { id: "r1", name: "5층 포커스룸", tower: "미르타워", floor: 5, capacity: 8 },
@@ -563,6 +624,7 @@ export default function MeetingSchedulerApp() {
   );
   const [rooms, setRooms] = usePersistentState(STORAGE_KEYS.rooms, ROOMS_BASE);
   const [teams, setTeams] = usePersistentState(STORAGE_KEYS.teams, TEAMS_BASE);
+  const [jobs, setJobs] = usePersistentState(STORAGE_KEYS.jobs, JOBS_BASE);
 
   const showToast = (message) => {
     setToast(message);
@@ -603,7 +665,7 @@ export default function MeetingSchedulerApp() {
           <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 21, color: C.ink900 }}>회사 캘린더</span>
         </div>
         <button onClick={() => setShowAdmin(true)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center", gap: 6, color: C.ink600, fontFamily: FONT, fontSize: 13 }}>
-          <Settings size={17} /> 구성원 관리
+          <Settings size={17} /> 관리
         </button>
       </div>
       <div style={{ display: "flex", gap: 44 }}>
@@ -626,7 +688,7 @@ export default function MeetingSchedulerApp() {
       )}
 
       {wizard && (
-        <CreationWizard wizard={wizard} setWizard={setWizard} people={people} events={events} companySettings={companySettings} rooms={rooms} onClose={() => setWizard(null)}
+        <CreationWizard wizard={wizard} setWizard={setWizard} people={people} jobs={jobs} events={events} companySettings={companySettings} rooms={rooms} onClose={() => setWizard(null)}
           onQuickCreate={(title, dateStr, startHour, durationMinutes, attendeeIds, roomId) => {
             quickCreate(title, dateStr, startHour, durationMinutes, attendeeIds, roomId);
             setWizard(null);
@@ -651,7 +713,7 @@ export default function MeetingSchedulerApp() {
       )}
 
       {showAdmin && (
-        <AdminPanel people={people} setPeople={setPeople} companySettings={companySettings} setCompanySettings={setCompanySettings}
+        <AdminPanel people={people} setPeople={setPeople} events={events} setEvents={setEvents} jobs={jobs} setJobs={setJobs} companySettings={companySettings} setCompanySettings={setCompanySettings}
           rooms={rooms} setRooms={setRooms} teams={teams} setTeams={setTeams} onClose={() => setShowAdmin(false)} />
       )}
     </div>
@@ -926,7 +988,7 @@ function formatScheduleLabel(dateStr, startHour, durationMinutes) {
 }
 const fieldButtonStyle = { height: 46, border: `1px solid ${C.border}`, borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, background: "none", cursor: "pointer", width: "100%", boxSizing: "border-box", fontFamily: FONT };
 
-function CreationWizard({ wizard, setWizard, people, events, companySettings, rooms, onClose, onConfirm, onQuickCreate }) {
+function CreationWizard({ wizard, setWizard, people, jobs, events, companySettings, rooms, onClose, onConfirm, onQuickCreate }) {
   const [index, setIndex] = useState(0);
   const [loadingStep, setLoadingStep] = useState(0);
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
@@ -1190,7 +1252,10 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
                   <Avatar person={p} />
                   <div style={{ flex: 1 }}>
                     <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{p.name}</div>
-                    <div style={{ fontFamily: FONT, fontSize: 13, color: C.ink500 }}>{p.team} · {p.role}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+                      <span style={{ fontFamily: FONT, fontSize: 13, color: C.ink500 }}>{p.team}</span>
+                      <span style={{ padding: "2px 7px", borderRadius: 999, background: C.bg2, color: C.ink800, fontFamily: FONT, fontSize: 11, fontWeight: 600 }}>{jobs.find((job) => job.name === p.role)?.short || p.role}</span>
+                    </div>
                   </div>
                   {isAdded ? <CheckCircleFilled size={20} color="#22c55e" /> : <Circle size={20} color={C.border} />}
                 </div>
@@ -1498,152 +1563,90 @@ const timeStrToHour = (str) => { const [h, m] = str.split(":").map(Number); retu
 const adminInputStyle = { width: "100%", height: 38, border: `1px solid ${C.border}`, borderRadius: 8, padding: "0 10px", fontFamily: FONT, fontSize: 14, boxSizing: "border-box" };
 const adminLabel = { fontFamily: FONT, fontSize: 12, color: C.ink500, marginBottom: 4 };
 
-function AdminPanel({ people, setPeople, companySettings, setCompanySettings, rooms, setRooms, teams, setTeams, onClose }) {
+function AdminPanel({ people, setPeople, events, setEvents, jobs, setJobs, companySettings, setCompanySettings, rooms, setRooms, teams, setTeams, onClose }) {
+  const [tab, setTab] = useState("company");
   const updateCompanySetting = (field, rawValue) => {
     const parsed = timeStrToHour(rawValue);
     if (!Number.isFinite(parsed)) return;
-    setCompanySettings((current) => {
-      const normalized = normalizeCompanySettings(current);
-      const next = normalizeCompanySettings({ ...normalized, [field]: parsed });
-      // 입력 직후에도 저장해 새로고침 타이밍과 관계없이 유지한다.
-      writeStored(STORAGE_KEYS.companySettings, next);
-      return next;
-    });
+    setCompanySettings((current) => normalizeCompanySettings({ ...current, [field]: parsed }));
   };
   const updatePerson = (id, patch) => setPeople((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const updatePersonRole = (person, role) => {
+    updatePerson(person.id, { role });
+    setEvents((prev) => ({
+      ...prev,
+      [person.id]: [
+        ...(prev[person.id] || []).filter((event) => !event.roleDemo),
+        ...generateRoleEventsForPerson({ ...person, role }),
+      ],
+    }));
+  };
   const removePerson = (id) => { if (id === ME_ID) return; setPeople((prev) => prev.filter((p) => p.id !== id)); };
   const addPerson = () => {
     const color = COLOR_PALETTE[people.length % COLOR_PALETTE.length];
-    const newId = `p${Date.now()}`;
-    setPeople((prev) => [...prev, {
-      id: newId, name: "새 팀원", team: teams[0] || "", role: "", tower: TOWERS[0], floor: 5,
-      avatarBg: color.avatarBg, avatarText: color.avatarText,
-    }]);
+    const person = { id: `p${Date.now()}`, name: "새 팀원", team: teams[0] || "", role: jobs[0]?.name || "", tower: TOWERS[0], floor: 5, avatarBg: color.avatarBg, avatarText: color.avatarText };
+    setPeople((prev) => [...prev, person]);
+    setEvents((prev) => ({ ...prev, [person.id]: generateRoleEventsForPerson(person) }));
   };
-
   const updateRoom = (id, patch) => setRooms((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const removeRoom = (id) => setRooms((prev) => prev.filter((r) => r.id !== id));
   const addRoom = () => setRooms((prev) => [...prev, { id: `r${Date.now()}`, name: "새 회의실", tower: TOWERS[0], floor: 1, capacity: 4 }]);
-
   const updateTeam = (i, value) => setTeams((prev) => prev.map((t, idx) => (idx === i ? value : t)));
   const removeTeam = (i) => setTeams((prev) => prev.filter((_, idx) => idx !== i));
   const addTeam = () => setTeams((prev) => [...prev, "새 팀"]);
+  const updateJob = (id, patch) => setJobs((prev) => prev.map((job) => job.id === id ? { ...job, ...patch } : job));
+  const addJob = () => setJobs((prev) => [...prev, { id: `job-${Date.now()}`, name: "새 직무", short: "NEW" }]);
+  const removeJob = (id) => setJobs((prev) => prev.filter((job) => job.id !== id));
 
+  const cardStyle = { border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 };
   return (
-    <Overlay onClose={onClose} width={640}>
-      <PanelHeader title="구성원 관리" onClose={onClose} />
-      <div style={{ padding: "0 24px 24px 24px", display: "flex", flexDirection: "column", gap: 20, maxHeight: "64vh", overflowY: "auto" }}>
-        <div style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 }}>
-          <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14, marginBottom: 12 }}>회사 설정</div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <div style={{ flex: 1 }}>
-              <div style={adminLabel}>점심 시작</div>
-              <input type="time" value={hourToTimeStr(companySettings.lunchStart)} onChange={(e) => setCompanySettings((c) => {
-                const lunchStart = timeStrToHour(e.target.value);
-                const currentDuration = Math.max(0.5, c.lunchEnd - c.lunchStart);
-                return { ...c, lunchStart, lunchEnd: Math.min(24, lunchStart + currentDuration) };
-              })} style={adminInputStyle} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={adminLabel}>점심 종료</div>
-              <input type="time" value={hourToTimeStr(companySettings.lunchEnd)} onChange={(e) => setCompanySettings((c) => {
-                const lunchEnd = timeStrToHour(e.target.value);
-                return { ...c, lunchEnd: Math.max(c.lunchStart + 0.5, lunchEnd) };
-              })} style={adminInputStyle} />
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <div style={adminLabel}>출근 시간</div>
-              <input type="time" value={hourToTimeStr(companySettings.commuteIn)} onInput={(e) => updateCompanySetting("commuteIn", e.currentTarget.value)} onChange={(e) => updateCompanySetting("commuteIn", e.currentTarget.value)} style={adminInputStyle} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={adminLabel}>퇴근 시간</div>
-              <input type="time" value={hourToTimeStr(companySettings.commuteOut)} onInput={(e) => updateCompanySetting("commuteOut", e.currentTarget.value)} onChange={(e) => updateCompanySetting("commuteOut", e.currentTarget.value)} style={adminInputStyle} />
-            </div>
-          </div>
-          <div style={{ fontSize: 12, color: C.ink500, marginTop: 8 }}>회사 전체에 적용되는 공통 설정이에요. 캘린더 표시와 회의 후보 계산에 바로 반영돼요.</div>
-        </div>
-
-        <div style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 }}>
-          <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14, marginBottom: 12 }}>팀 목록</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {teams.map((t, i) => (
-              <div key={i} style={{ display: "flex", gap: 8 }}>
-                <input value={t} onChange={(e) => updateTeam(i, e.target.value)} style={{ ...adminInputStyle, flex: 1 }} />
-                <button onClick={() => removeTeam(i)} style={{ background: "none", border: "none", cursor: "pointer" }}><Trash2 size={16} color="#b62c2c" /></button>
-              </div>
-            ))}
-          </div>
-          <button onClick={addTeam} style={{ ...SecondaryButtonStyle, marginTop: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%" }}>
-            <Plus size={15} /> 팀 추가
-          </button>
-        </div>
-
-        <div style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 }}>
-          <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14, marginBottom: 12 }}>회의실 목록</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {rooms.map((r) => (
-              <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input value={r.name} onChange={(e) => updateRoom(r.id, { name: e.target.value })} style={{ ...adminInputStyle, flex: 2 }} />
-                <select value={r.tower} onChange={(e) => updateRoom(r.id, { tower: e.target.value })} style={{ ...adminInputStyle, flex: 1 }}>
-                  {TOWERS.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-                <input type="number" value={r.floor} onChange={(e) => updateRoom(r.id, { floor: Number(e.target.value) })} style={{ ...adminInputStyle, width: 56 }} title="층" />
-                <input type="number" value={r.capacity} onChange={(e) => updateRoom(r.id, { capacity: Number(e.target.value) })} style={{ ...adminInputStyle, width: 56 }} title="정원" />
-                <button onClick={() => removeRoom(r.id)} style={{ background: "none", border: "none", cursor: "pointer" }}><Trash2 size={16} color="#b62c2c" /></button>
-              </div>
-            ))}
-          </div>
-          <button onClick={addRoom} style={{ ...SecondaryButtonStyle, marginTop: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%" }}>
-            <Plus size={15} /> 회의실 추가
-          </button>
-        </div>
-
-        <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14 }}>구성원</div>
-        {people.map((p) => (
-          <div key={p.id} style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <Avatar person={p} />
-              <input value={p.name} onChange={(e) => updatePerson(p.id, { name: e.target.value })}
-                style={{ ...adminInputStyle, flex: 1, fontWeight: 600 }} />
-              {p.id !== ME_ID && (
-                <button onClick={() => removePerson(p.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
-                  <Trash2 size={16} color="#b62c2c" />
-                </button>
-              )}
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <div style={{ flex: 1 }}>
-                <div style={adminLabel}>팀</div>
-                <select value={p.team || ""} onChange={(e) => updatePerson(p.id, { team: e.target.value })} style={adminInputStyle}>
-                  {teams.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={adminLabel}>직무</div>
-                <input value={p.role || ""} onChange={(e) => updatePerson(p.id, { role: e.target.value })} style={adminInputStyle} />
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <div style={{ flex: 1 }}>
-                <div style={adminLabel}>타워</div>
-                <select value={p.tower || TOWERS[0]} onChange={(e) => updatePerson(p.id, { tower: e.target.value })} style={adminInputStyle}>
-                  {TOWERS.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={adminLabel}>층</div>
-                <input type="number" value={p.floor} onChange={(e) => updatePerson(p.id, { floor: Number(e.target.value) })} style={adminInputStyle} />
-              </div>
-            </div>
-          </div>
+    <Overlay onClose={onClose} width={680}>
+      <PanelHeader title="관리" onClose={onClose} />
+      <div style={{ display: "flex", gap: 8, padding: "0 24px 16px" }}>
+        {[['회사', 'company'], ['구성원', 'people']].map(([label, value]) => (
+          <button key={value} onClick={() => setTab(value)} style={{ flex: 1, height: 42, border: "none", borderRadius: 10, cursor: "pointer", fontFamily: FONT, fontSize: 15, fontWeight: 600, background: tab === value ? C.blue200 : C.bg2, color: tab === value ? C.blue : C.ink800 }}>{label}</button>
         ))}
-        <button onClick={addPerson} style={{ ...SecondaryButtonStyle, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-          <Plus size={15} /> 새 팀원 추가
-        </button>
+      </div>
+      <div style={{ padding: "0 24px 24px", display: "flex", flexDirection: "column", gap: 16, maxHeight: "66vh", overflowY: "auto" }}>
+        {tab === "company" ? <>
+          <div style={cardStyle}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>회사 시간</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {[['점심 시작','lunchStart'],['점심 종료','lunchEnd'],['출근 시간','commuteIn'],['퇴근 시간','commuteOut']].map(([label, field]) => <div key={field}><div style={adminLabel}>{label}</div><input type="time" value={hourToTimeStr(companySettings[field])} onChange={(e) => updateCompanySetting(field, e.target.value)} style={adminInputStyle} /></div>)}
+            </div>
+          </div>
+          <div style={cardStyle}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>직무</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {jobs.map((job) => <div key={job.id} style={{ display: "grid", gridTemplateColumns: "1fr 90px 32px", gap: 8 }}><input value={job.name} onChange={(e) => updateJob(job.id, { name: e.target.value })} style={adminInputStyle} /><input value={job.short} onChange={(e) => updateJob(job.id, { short: e.target.value.toUpperCase().slice(0, 5) })} style={adminInputStyle} /><button onClick={() => removeJob(job.id)} style={{ border: "none", background: "none", cursor: "pointer" }}><Trash2 size={16} color="#F95C5C" /></button></div>)}
+            </div>
+            <button onClick={addJob} style={{ ...SecondaryButtonStyle, width: "100%", marginTop: 8 }}><Plus size={15} /> 직무 추가</button>
+          </div>
+          <div style={cardStyle}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>팀</div>
+            {teams.map((team, i) => <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}><input value={team} onChange={(e) => updateTeam(i, e.target.value)} style={adminInputStyle} /><button onClick={() => removeTeam(i)} style={{ border: "none", background: "none", cursor: "pointer" }}><Trash2 size={16} color="#F95C5C" /></button></div>)}
+            <button onClick={addTeam} style={{ ...SecondaryButtonStyle, width: "100%" }}><Plus size={15} /> 팀 추가</button>
+          </div>
+          <div style={cardStyle}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>회의실</div>
+            {rooms.map((r) => <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 56px 56px 32px", gap: 8, marginBottom: 8 }}><input value={r.name} onChange={(e) => updateRoom(r.id, { name: e.target.value })} style={adminInputStyle} /><select value={r.tower} onChange={(e) => updateRoom(r.id, { tower: e.target.value })} style={adminInputStyle}>{TOWERS.map(t => <option key={t}>{t}</option>)}</select><input type="number" value={r.floor} onChange={(e) => updateRoom(r.id, { floor: Number(e.target.value) })} style={adminInputStyle} /><input type="number" value={r.capacity} onChange={(e) => updateRoom(r.id, { capacity: Number(e.target.value) })} style={adminInputStyle} /><button onClick={() => removeRoom(r.id)} style={{ border: "none", background: "none", cursor: "pointer" }}><Trash2 size={16} color="#F95C5C" /></button></div>)}
+            <button onClick={addRoom} style={{ ...SecondaryButtonStyle, width: "100%" }}><Plus size={15} /> 회의실 추가</button>
+          </div>
+        </> : <>
+          {people.map((person) => <div key={person.id} style={cardStyle}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}><Avatar person={person} /><input value={person.name} onChange={(e) => updatePerson(person.id, { name: e.target.value })} style={{ ...adminInputStyle, flex: 1, fontWeight: 600 }} />{person.id !== ME_ID && <button onClick={() => removePerson(person.id)} style={{ border: "none", background: "none", cursor: "pointer" }}><Trash2 size={16} color="#F95C5C" /></button>}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div><div style={adminLabel}>팀</div><select value={person.team} onChange={(e) => updatePerson(person.id, { team: e.target.value })} style={adminInputStyle}>{teams.map(t => <option key={t}>{t}</option>)}</select></div>
+              <div><div style={adminLabel}>직무</div><select value={person.role} onChange={(e) => updatePersonRole(person, e.target.value)} style={adminInputStyle}>{jobs.map(job => <option key={job.id} value={job.name}>{job.name} ({job.short})</option>)}</select></div>
+              <div><div style={adminLabel}>타워</div><select value={person.tower} onChange={(e) => updatePerson(person.id, { tower: e.target.value })} style={adminInputStyle}>{TOWERS.map(t => <option key={t}>{t}</option>)}</select></div>
+              <div><div style={adminLabel}>층</div><input type="number" value={person.floor} onChange={(e) => updatePerson(person.id, { floor: Number(e.target.value) })} style={adminInputStyle} /></div>
+            </div>
+          </div>)}
+          <button onClick={addPerson} style={{ ...SecondaryButtonStyle, width: "100%" }}><Plus size={15} /> 새 팀원 추가</button>
+        </>}
       </div>
     </Overlay>
   );
 }
+
 const SecondaryButtonStyle = { padding: "13px 20px", background: "#F2F0E9", color: "#1C1C1A", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" };
