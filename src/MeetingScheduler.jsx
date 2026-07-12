@@ -1,7 +1,41 @@
 import React, { useState, useMemo } from "react";
-import {
-  ChevronLeft, ChevronRight, X, Plus, Search, Check, CalendarCheck2, Clock, MapPin, Trash2, Circle, CheckCircle2, Pencil, Settings,
-} from "lucide-react";
+import arrowLeftIcon from "./assets/icons/icon-arrow-left-small-mono.svg";
+import arrowRightIcon from "./assets/icons/icon-arrow-right-small-mono.svg";
+import closeIcon from "./assets/icons/icon-x-mono.svg";
+import plusIcon from "./assets/icons/icon-plus-mono.svg";
+import searchIcon from "./assets/icons/icon-search-mono.svg";
+import checkIcon from "./assets/icons/icon-check-mono.svg";
+import calendarIcon from "./assets/icons/icon-calendar-check-mono.svg";
+import clockIcon from "./assets/icons/icon-clock-mono.svg";
+import pinIcon from "./assets/icons/icon-pin-location-mono.svg";
+import binIcon from "./assets/icons/icon-bin-mono.svg";
+import circleIcon from "./assets/icons/icon-circle-empty-mono.svg";
+import checkCircleIcon from "./assets/icons/icon-check-circle-line-mono.svg";
+import pencilIcon from "./assets/icons/icon-pencil-mono.svg";
+import settingIcon from "./assets/icons/icon-setting-mono.svg";
+
+const ICONS = {
+  ChevronLeft: arrowLeftIcon, ChevronRight: arrowRightIcon, X: closeIcon, Plus: plusIcon, Search: searchIcon, Check: checkIcon,
+  CalendarCheck2: calendarIcon, Clock: clockIcon, MapPin: pinIcon, Trash2: binIcon, Circle: circleIcon,
+  CheckCircle2: checkCircleIcon, Pencil: pencilIcon, Settings: settingIcon,
+};
+function SvgIcon({ name, size = 24, color = "currentColor", style, ...props }) {
+  return <span aria-hidden="true" {...props} style={{ width: size, height: size, display: "inline-block", flexShrink: 0, backgroundColor: color, WebkitMask: `url(${ICONS[name]}) center / contain no-repeat`, mask: `url(${ICONS[name]}) center / contain no-repeat`, ...style }} />;
+}
+const ChevronLeft = (p) => <SvgIcon name="ChevronLeft" {...p} />;
+const ChevronRight = (p) => <SvgIcon name="ChevronRight" {...p} />;
+const X = (p) => <SvgIcon name="X" {...p} />;
+const Plus = (p) => <SvgIcon name="Plus" {...p} />;
+const Search = (p) => <SvgIcon name="Search" {...p} />;
+const Check = (p) => <SvgIcon name="Check" {...p} />;
+const CalendarCheck2 = (p) => <SvgIcon name="CalendarCheck2" {...p} />;
+const Clock = (p) => <SvgIcon name="Clock" {...p} />;
+const MapPin = (p) => <SvgIcon name="MapPin" {...p} />;
+const Trash2 = (p) => <SvgIcon name="Trash2" {...p} />;
+const Circle = (p) => <SvgIcon name="Circle" {...p} />;
+const CheckCircle2 = (p) => <SvgIcon name="CheckCircle2" {...p} />;
+const Pencil = (p) => <SvgIcon name="Pencil" {...p} />;
+const Settings = (p) => <SvgIcon name="Settings" {...p} />;
 
 /* ============================================================
    DESIGN TOKENS (Figma MCP로 추출한 실제 값)
@@ -484,7 +518,7 @@ export default function MeetingSchedulerApp() {
   };
 
   return (
-    <div style={{ fontFamily: FONT, color: C.ink900, background: C.white, display: "flex", flexDirection: "column", width: "100%", minWidth: 0, minHeight: "calc(100vh - 48px)", padding: "28px 32px", boxSizing: "border-box" }}>
+    <div style={{ fontFamily: FONT, color: C.ink900, background: C.white, display: "flex", flexDirection: "column", width: "100%", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 0 24px 0" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <CalendarCheck2 size={20} color={C.ink900} />
@@ -495,10 +529,10 @@ export default function MeetingSchedulerApp() {
         </button>
       </div>
       <div style={{ display: "flex", gap: 44 }}>
-        <Sidebar people={people} visibleIds={visibleIds} toggleVisible={toggleVisible} onCreate={() => setWizard({ ...EMPTY_WIZARD })} weekStart={weekStart} setWeekStart={setWeekStart} />
+        <Sidebar people={people} visibleIds={visibleIds} toggleVisible={toggleVisible} onCreate={() => setWizard({ ...EMPTY_WIZARD, step: "quickBase", origin: "toolbar", roomRequired: true })} weekStart={weekStart} setWeekStart={setWeekStart} />
         <CalendarGrid
           people={people} visibleIds={visibleIds} events={events} weekStart={weekStart} setWeekStart={setWeekStart} rsvp={rsvp} companySettings={companySettings}
-          onEmptyClick={(day, hour) => setWizard({ ...EMPTY_WIZARD, dateStr: day, startHour: hour })}
+          onEmptyClick={(day, hour) => setWizard({ ...EMPTY_WIZARD, origin: "calendar", dateStr: day, startHour: hour })}
           onEventClick={(personId, ev) => setDetail({ personId, ev })}
         />
       </div>
@@ -714,8 +748,10 @@ function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, rsv
                 const isConfirmedMeeting = !!ev.groupId;
                 const rsvpStatus = isConfirmedMeeting ? rsvp?.[`${ev.groupId}:${personId}`] : null;
 
-                let bg = person.avatarBg, textColor = person.avatarText, secondaryColor = C.ink900, strike = false;
-                if (rsvpStatus === "yes") { bg = person.avatarText; textColor = C.white; secondaryColor = "rgba(255,255,255,0.85)"; }
+                const durationMin = (e - s) / 60000;
+                const isCompact = durationMin <= 30;
+                let bg = person.avatarBg, textColor = C.ink900, secondaryColor = C.ink900, strike = false;
+                if (rsvpStatus === "yes") { bg = person.avatarText; textColor = C.white; secondaryColor = C.white; }
                 else if (rsvpStatus === "no") { bg = C.bg2; textColor = C.ink400; secondaryColor = C.ink400; strike = true; }
 
                 return (
@@ -724,11 +760,13 @@ function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, rsv
                       position: "absolute", top, left: 4 + offset, right: 4, height, zIndex: 2, cursor: "pointer",
                       background: bg, borderRadius: 8, padding: 8, overflow: "hidden",
                     }}>
-                    <div style={{ fontFamily: FONT, fontSize: 13, fontWeight: 500, color: textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: strike ? "line-through" : "none" }}>
-                      {ev.title}
-                    </div>
-                    <div style={{ fontFamily: FONT, fontSize: 13, color: secondaryColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {fmtAmPm(s)}~{fmtAmPm(e)}
+                    <div style={{ display: "flex", flexDirection: isCompact ? "row" : "column", alignItems: isCompact ? "center" : "stretch", gap: isCompact ? 6 : 0, minWidth: 0 }}>
+                      <div style={{ fontFamily: FONT, fontSize: 13, fontWeight: 500, color: textColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: strike ? "line-through" : "none", minWidth: 0 }}>
+                        {ev.title}
+                      </div>
+                      <div style={{ fontFamily: FONT, fontSize: 13, color: secondaryColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flexShrink: 0 }}>
+                        {fmtAmPm(s)}~{fmtAmPm(e)}
+                      </div>
                     </div>
                   </div>
                 );
@@ -821,7 +859,7 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
   const request = useMemo(() => ({
     title: wizard.title || "새 회의", purpose: wizard.purpose, durationMinutes: wizard.durationMinutes,
     dateRangeStart: WEEK_DAYS[0] + "T09:00:00", dateRangeEnd: WEEK_DAYS[4] + "T19:00:00",
-    requiredRoom: true, forcedRoomId: wizard.forcedRoomId, requiredIds, optionalIds,
+    requiredRoom: wizard.roomRequired !== false, forcedRoomId: wizard.forcedRoomId, requiredIds, optionalIds,
   }), [wizard, requiredIds.join(","), optionalIds.join(",")]);
 
   const candidates = useMemo(() => (wizard.step === 3 ? generateCandidates(request, people, events, companySettings, rooms) : []), [wizard.step, request, events, companySettings, rooms]);
@@ -868,6 +906,37 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
       onQuickCreate(wizard.title, wizard.dateStr, wizard.startHour, wizard.durationMinutes, [ME_ID], wizard.forcedRoomId);
     }
   };
+
+  if (wizard.step === "quickBase") {
+    const selectedPeople = people.filter((p) => wizard.attendees[p.id]);
+    const roomRequired = wizard.roomRequired !== false;
+    return (
+      <Overlay onClose={onClose} width={460} minHeight={560}>
+        <PanelHeader title="어떤 일정을 추가할까요?" onClose={onClose} />
+        <div style={{ padding: "10px 24px", display: "flex", flexDirection: "column", gap: 30 }}>
+          <Field label="제목">
+            <input autoFocus placeholder="일정 이름을 입력해 주세요." value={wizard.title} onChange={(e) => setWizard({ ...wizard, title: e.target.value })}
+              style={{ height: 46, border: `1px solid ${wizard.title ? C.blue : C.border}`, borderRadius: 10, padding: "8px 12px", fontFamily: FONT, fontWeight: 500, fontSize: 17, outline: "none", width: "100%", boxSizing: "border-box" }} />
+          </Field>
+          <Field label="참석자">
+            <button onClick={() => setWizard({ ...wizard, step: "attendees" })} style={fieldButtonStyle}>
+              <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: selectedPeople.length > 1 ? C.black : C.ink500, flex: 1, textAlign: "left" }}>참석자 찾기</span>
+              <Search size={18} color={C.ink500} />
+            </button>
+          </Field>
+          <Field label="시간">
+            <Toggle options={[["1시간", 60], ["30분", 30], ["직접 선택", "custom"]]} value={wizard.durationMinutes} onChange={(v) => v === "custom" ? setWizard({ ...wizard, step: "datetime" }) : setWizard({ ...wizard, durationMinutes: v })} />
+          </Field>
+          <Field label="회의실">
+            <Toggle options={[["필요", true], ["필요없음", false]]} value={roomRequired} onChange={(v) => setWizard({ ...wizard, roomRequired: v, forcedRoomId: v ? wizard.forcedRoomId : null })} />
+          </Field>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "20px 24px 24px", marginTop: "auto" }}>
+          <PrimaryButton disabled={!wizard.title.trim()} onClick={handleNext}>다음</PrimaryButton>
+        </div>
+      </Overlay>
+    );
+  }
 
   if (wizard.step === "base") {
     return (
@@ -955,8 +1024,8 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
           </Field>
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "20px 24px 24px 24px", marginTop: "auto" }}>
-          <SecondaryButton onClick={() => setWizard({ ...wizard, step: "base" })}>이전</SecondaryButton>
-          <PrimaryButton onClick={() => setWizard({ ...wizard, step: "base" })}>확인</PrimaryButton>
+          <SecondaryButton onClick={() => setWizard({ ...wizard, step: wizard.origin === "toolbar" ? "quickBase" : "base" })}>이전</SecondaryButton>
+          <PrimaryButton onClick={() => setWizard({ ...wizard, step: wizard.origin === "toolbar" ? "quickBase" : "base" })}>확인</PrimaryButton>
         </div>
       </Overlay>
     );
@@ -1007,8 +1076,8 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
           </div>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "20px 24px 24px 24px", marginTop: "auto" }}>
-          <SecondaryButton onClick={() => setWizard({ ...wizard, step: "base" })}>이전</SecondaryButton>
-          <PrimaryButton onClick={() => setWizard({ ...wizard, step: "base" })}>{selectedPeople.length}명 추가</PrimaryButton>
+          <SecondaryButton onClick={() => setWizard({ ...wizard, step: wizard.origin === "toolbar" ? "quickBase" : "base" })}>이전</SecondaryButton>
+          <PrimaryButton onClick={() => setWizard({ ...wizard, step: wizard.origin === "toolbar" ? "quickBase" : "base" })}>{selectedPeople.length}명 추가</PrimaryButton>
         </div>
       </Overlay>
     );
@@ -1072,7 +1141,7 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "24px 24px 20px 24px" }}>
         <span style={{ fontFamily: FONT, fontSize: 15, color: C.ink600 }}>
           {wizard.title} · {Object.keys(wizard.attendees).length}인{" "}
-          <span onClick={() => setWizard({ ...wizard, step: 0 })} style={{ textDecoration: "underline", cursor: "pointer" }}>조건 수정</span>
+          <span onClick={() => setWizard({ ...wizard, step: wizard.origin === "toolbar" ? "quickBase" : "base" })} style={{ textDecoration: "underline", cursor: "pointer" }}>조건 수정</span>
         </span>
         <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer" }}><X size={16} color={C.ink900} /></button>
       </div>
@@ -1085,9 +1154,9 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.blue }}>확정 가능 일정</span>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <button onClick={() => setIndex((i) => Math.max(0, i - 1))} disabled={index === 0} style={{ border: `1px solid ${C.border}`, borderRadius: 6, width: 18, height: 18, background: "none", cursor: "pointer" }}><ChevronLeft size={12} color={C.ink900} /></button>
+                <button onClick={() => setIndex((i) => Math.max(0, i - 1))} disabled={index === 0} style={{ border: `1px solid ${C.border}`, borderRadius: 8, width: 32, height: 32, padding: 0, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "none", cursor: "pointer" }}><ChevronLeft size={18} color={C.ink900} /></button>
                 <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{index + 1} / {candidates.length}</span>
-                <button onClick={() => setIndex((i) => Math.min(candidates.length - 1, i + 1))} disabled={index === candidates.length - 1} style={{ border: `1px solid ${C.border}`, borderRadius: 6, width: 18, height: 18, background: "none", cursor: "pointer" }}><ChevronRight size={12} color={C.ink900} /></button>
+                <button onClick={() => setIndex((i) => Math.min(candidates.length - 1, i + 1))} disabled={index === candidates.length - 1} style={{ border: `1px solid ${C.border}`, borderRadius: 8, width: 32, height: 32, padding: 0, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "none", cursor: "pointer" }}><ChevronRight size={18} color={C.ink900} /></button>
               </div>
             </div>
             <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 21, color: C.black }}>{current.start.getMonth() + 1}월 {current.start.getDate()}일 {fmtAmPm(current.start)}~{fmtAmPm(current.end)}</div>
