@@ -9,8 +9,8 @@ export const AI_THINKING_STEPS = [
 ];
 
 export const AI_LOADING_STEP_COUNT = AI_THINKING_STEPS.length;
-export const AI_STEP_DURATION_MS = 260;
-export const AI_RESULTS_DELAY_MS = 280;
+export const AI_STEP_DURATION_MS = 660;
+export const AI_RESULTS_DELAY_MS = 560;
 
 function AiThinkingStepRow({ step, state, Check, Spinner }) {
   const isDone = state === "done";
@@ -27,14 +27,15 @@ function AiThinkingStepRow({ step, state, Check, Spinner }) {
       }}
     >
       <span style={{ width: 16, height: 16, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-        {isDone ? <Check size={16} color="#22c55e" /> : <Spinner />}
+        {isDone ? (
+          <span style={{ width: 16, height: 16, borderRadius: "50%", background: C.blue, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            <Check size={10} color={C.white} />
+          </span>
+        ) : (
+          <Spinner />
+        )}
       </span>
-      <span
-        style={{
-          transition: "opacity 0.22s ease, color 0.22s ease",
-          opacity: 1,
-        }}
-      >
+      <span style={{ transition: "opacity 0.22s ease, color 0.22s ease", opacity: 1 }}>
         {isDone ? step.done : step.loading}
       </span>
     </div>

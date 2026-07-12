@@ -12,7 +12,7 @@ export type MeetingCategory =
   | "review"
   | "common";
 
-export type TitleMode = "plain" | "oneOnOne" | "designPrefix" | "productPrefix";
+export type TitleMode = "plain" | "oneOnOne";
 
 export interface MockPerson {
   id: string;
@@ -69,6 +69,23 @@ export interface DraftScheduleItem {
   category: MeetingCategory;
 }
 
+export interface DemoRoom {
+  id: string;
+  name: string;
+  tower: string;
+  floor: number;
+  capacity: number;
+}
+
+export interface DemoMeetingMeta {
+  requiredIds: string[];
+  optionalIds: string[];
+  room?: DemoRoom;
+  checkpoints: { description: string }[];
+  start: string;
+  end: string;
+}
+
 export interface GeneratedCalendarEvent {
   id: string;
   title: string;
@@ -77,8 +94,13 @@ export interface GeneratedCalendarEvent {
   visibility: "public" | "private";
   type: EventType;
   movable: boolean;
-  roleDemo: true;
+  roleDemo?: true;
+  groupId?: string;
+  room?: DemoRoom;
+  meetingMeta?: DemoMeetingMeta;
 }
+
+export type DemoRsvpMap = Record<string, "yes" | "no">;
 
 export interface PersonCalendarTraits {
   meetingCountBias: number;

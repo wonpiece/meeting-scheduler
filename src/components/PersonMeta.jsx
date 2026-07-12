@@ -1,26 +1,9 @@
 import { C, FONT } from "../admin/adminStyles";
 
-export function RoleTag({ short }) {
-  return (
-    <span
-      style={{
-        padding: "2px 7px",
-        borderRadius: 999,
-        background: C.bg2,
-        color: C.ink800,
-        fontFamily: FONT,
-        fontSize: 11,
-        fontWeight: 600,
-        flexShrink: 0,
-      }}
-    >
-      {short}
-    </span>
-  );
-}
+/** 이름 + 주최자 · 소속 · 직무 */
+export function PersonMeta({ name, team, roleShort, isHost = false, nameStyle, compact = false }) {
+  const metaLine = [isHost ? "주최자" : null, team, roleShort].filter(Boolean).join(" · ");
 
-/** 이름 | 팀 | 직무 축약명 태그 */
-export function PersonMeta({ name, team, roleShort, nameStyle, compact = false }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
       <div
@@ -34,19 +17,18 @@ export function PersonMeta({ name, team, roleShort, nameStyle, compact = false }
       >
         {name}
       </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          marginTop: compact ? 0 : 2,
-          flexWrap: "wrap",
-        }}
-      >
-        <span style={{ fontFamily: FONT, fontSize: 13, color: C.ink500 }}>{team}</span>
-        <span style={{ fontFamily: FONT, fontSize: 12, color: C.ink500 }}>|</span>
-        <RoleTag short={roleShort} />
-      </div>
+      {metaLine && (
+        <div
+          style={{
+            fontFamily: FONT,
+            fontSize: 13,
+            color: C.ink500,
+            marginTop: compact ? 0 : 2,
+          }}
+        >
+          {metaLine}
+        </div>
+      )}
     </div>
   );
 }
