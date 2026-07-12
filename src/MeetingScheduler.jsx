@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import arrowLeftIcon from "./assets/icons/icon-arrow-left-small-mono.svg?raw";
 import arrowRightIcon from "./assets/icons/icon-arrow-right-small-mono.svg?raw";
 import closeIcon from "./assets/icons/icon-x-mono.svg?raw";
@@ -74,6 +74,32 @@ const C = {
 };
 
 const FONT = "'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif";
+
+const STORAGE_KEYS = {
+  people: "meeting-scheduler:people",
+  events: "meeting-scheduler:events",
+  companySettings: "meeting-scheduler:company-settings",
+  rooms: "meeting-scheduler:rooms",
+  teams: "meeting-scheduler:teams",
+  rsvp: "meeting-scheduler:rsvp",
+};
+
+function readStored(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStored(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // localStorage가 차단된 환경에서는 현재 세션 상태만 유지
+  }
+}
 
 /* ============================================================
    1. DATA MODEL — Figma 디자인의 실제 인물명/아바타 색상 그대로 사용
@@ -258,10 +284,11 @@ function getCompanyBurden(slotStart, slotEnd, companySettings) {
   const startH = slotStart.getHours() + slotStart.getMinutes() / 60;
   const endH = slotEnd.getHours() + slotEnd.getMinutes() / 60;
   const cs = companySettings || DEFAULT_COMPANY_SETTINGS;
+  const commuteBufferHours = 1;
   return {
-    duringLunch: startH < cs.lunchEnd && endH > cs.lunchStart, // 점심시간과 겹침
-    justArrived: startH === cs.commuteIn, // 출근 직후 첫 슬롯
-    beforeLeaving: endH === cs.commuteOut, // 퇴근 직전 마지막 슬롯
+    duringLunch: startH < cs.lunchEnd && endH > cs.lunchStart, // 점심시간과 조금이라도 겹침
+    justArrived: startH >= cs.commuteIn && startH < cs.commuteIn + commuteBufferHours, // 출근 후 1시간 이내
+    beforeLeaving: endH > cs.commuteOut - commuteBufferHours && endH <= cs.commuteOut, // 퇴근 전 1시간 이내
   };
 }
 function getDayMeetingCount(personId, date, events) {
@@ -423,6 +450,9 @@ function generateCandidates(request, people, events, companySettings, rooms) {
   people.forEach((p) => (floorOf[p.id] = p.floor));
   const slots = generateSlots(request, companySettings);
   const evaluated = slots.map((slot) => evaluateSlot(slot, request, people, floorOf, events, companySettings, rooms));
+  // 회사 점심시간은 선호도가 낮은 시간이 아니라 추천 대상에서 제외하는 공통 휴게시간으로 취급한다.
+  // 점심·출근 직후·퇴근 직전은 후보에서 제외하지 않는다.
+  // 대신 evaluateSlot에서 soft_time 체크포인트와 burdenAvoided 점수로 우선순위를 낮춘다.
   const visible = evaluated.filter((c) => c.status !== "not_recommended");
   const sorted = sortCandidates(visible, request.purpose);
   const picked = [];
@@ -491,18 +521,25 @@ function Toggle({ options, value, onChange }) {
 const EMPTY_WIZARD = { step: "base", title: "", dateStr: "2026-07-12", startHour: 10, endHour: 11, durationMinutes: 60, roomRequired: true, forcedRoomId: null, purpose: PURPOSE_DEFAULT, attendees: { yj: "required" }, search: "" };
 
 export default function MeetingSchedulerApp() {
-  const [people, setPeople] = useState(PEOPLE_BASE);
-  const [events, setEvents] = useState(INITIAL_EVENTS);
+  const [people, setPeople] = useState(() => readStored(STORAGE_KEYS.people, PEOPLE_BASE));
+  const [events, setEvents] = useState(() => readStored(STORAGE_KEYS.events, INITIAL_EVENTS));
   const [visibleIds, setVisibleIds] = useState([ME_ID]);
   const [wizard, setWizard] = useState(null);
   const [detail, setDetail] = useState(null);
   const [toast, setToast] = useState(null);
   const [weekStart, setWeekStart] = useState(mondayOf(new Date(2026, 6, 13)));
-  const [rsvp, setRsvp] = useState({}); // `${groupId}:${personId}` -> 'yes' | 'no'
+  const [rsvp, setRsvp] = useState(() => readStored(STORAGE_KEYS.rsvp, {})); // `${groupId}:${personId}` -> 'yes' | 'no'
   const [showAdmin, setShowAdmin] = useState(false);
-  const [companySettings, setCompanySettings] = useState(DEFAULT_COMPANY_SETTINGS);
-  const [rooms, setRooms] = useState(ROOMS_BASE);
-  const [teams, setTeams] = useState(TEAMS_BASE);
+  const [companySettings, setCompanySettings] = useState(() => readStored(STORAGE_KEYS.companySettings, DEFAULT_COMPANY_SETTINGS));
+  const [rooms, setRooms] = useState(() => readStored(STORAGE_KEYS.rooms, ROOMS_BASE));
+  const [teams, setTeams] = useState(() => readStored(STORAGE_KEYS.teams, TEAMS_BASE));
+
+  useEffect(() => writeStored(STORAGE_KEYS.people, people), [people]);
+  useEffect(() => writeStored(STORAGE_KEYS.events, events), [events]);
+  useEffect(() => writeStored(STORAGE_KEYS.companySettings, companySettings), [companySettings]);
+  useEffect(() => writeStored(STORAGE_KEYS.rooms, rooms), [rooms]);
+  useEffect(() => writeStored(STORAGE_KEYS.teams, teams), [teams]);
+  useEffect(() => writeStored(STORAGE_KEYS.rsvp, rsvp), [rsvp]);
 
   const showToast = (message) => {
     setToast(message);
@@ -870,6 +907,7 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
   const [index, setIndex] = useState(0);
   const [loadingStep, setLoadingStep] = useState(0);
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
+  const [selectedRoomByCandidate, setSelectedRoomByCandidate] = useState({});
 
   const requiredIds = Object.keys(wizard.attendees).filter((id) => wizard.attendees[id] === "required");
   const optionalIds = Object.keys(wizard.attendees).filter((id) => wizard.attendees[id] === "optional");
@@ -882,6 +920,12 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
 
   const candidates = useMemo(() => (wizard.step === 3 ? generateCandidates(request, people, events, companySettings, rooms) : []), [wizard.step, request, events, companySettings, rooms]);
   const current = candidates[Math.min(index, Math.max(0, candidates.length - 1))];
+  const currentKey = current ? `${current.start.getTime()}-${current.end.getTime()}` : "";
+  const selectedRoomId = current ? (selectedRoomByCandidate[currentKey] || current.selectedRoom?.id) : undefined;
+  const currentWithRoom = current ? {
+    ...current,
+    selectedRoom: current.availableRooms.find((room) => room.id === selectedRoomId) || current.selectedRoom,
+  } : current;
 
   const addAttendee = (id) => setWizard((w) => ({ ...w, attendees: { ...w.attendees, [id]: "required" } }));
   const removeAttendee = (id) => setWizard((w) => { const next = { ...w.attendees }; delete next[id]; return { ...w, attendees: next }; });
@@ -1256,10 +1300,10 @@ function CreationWizard({ wizard, setWizard, people, events, companySettings, ro
             </div>
           )}
 
-          {current.requiredRoom && <RoomPicker current={current} />}
+          {current.requiredRoom && <RoomPicker current={currentWithRoom} selectedRoomId={selectedRoomId} onSelectRoom={(roomId) => setSelectedRoomByCandidate((prev) => ({ ...prev, [currentKey]: roomId }))} />}
 
           <div style={{ display: "flex", justifyContent: "flex-end", padding: "20px 24px 24px 24px", marginTop: "auto" }}>
-            <PrimaryButton disabled={current.status === "not_recommended"} onClick={() => onConfirm(current, requiredIds, optionalIds, wizard.title)}>선택하기</PrimaryButton>
+            <PrimaryButton disabled={current.status === "not_recommended"} onClick={() => onConfirm(currentWithRoom, requiredIds, optionalIds, wizard.title)}>선택하기</PrimaryButton>
           </div>
         </>
       )}
@@ -1284,22 +1328,50 @@ function Field({ label, children }) {
   );
 }
 
-function RoomPicker({ current }) {
-  const [roomId, setRoomId] = useState(current.selectedRoom?.id);
-  const room = current.availableRooms.find((r) => r.id === roomId) || current.selectedRoom;
+function RoomPicker({ current, selectedRoomId, onSelectRoom }) {
+  const [open, setOpen] = useState(false);
+  const room = current.availableRooms.find((r) => r.id === selectedRoomId) || current.selectedRoom;
   return (
-    <div style={{ padding: "0 24px" }}>
+    <div style={{ padding: "0 24px", position: "relative" }}>
       <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: C.ink900, marginBottom: 12 }}>회의실</div>
       {room ? (
-        <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: "14px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div>
-            <div style={{ fontFamily: FONT, fontSize: 15, color: C.black }}>{roomLabel(room)} ({room.capacity}인)</div>
-            <div style={{ fontFamily: FONT, fontSize: 11, color: C.blue }}>{current.roomReason}</div>
-          </div>
-          <select value={roomId} onChange={(e) => setRoomId(e.target.value)} style={{ border: "none", background: "none", fontSize: 13, color: C.ink600 }}>
-            {current.availableRooms.map((r) => <option key={r.id} value={r.id}>변경</option>)}
-          </select>
-        </div>
+        <>
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            style={{ width: "100%", border: `1px solid ${C.border}`, borderRadius: 10, padding: "14px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", background: C.white, cursor: "pointer", textAlign: "left", fontFamily: FONT }}
+          >
+            <div>
+              <div style={{ fontFamily: FONT, fontSize: 15, color: C.black }}>{roomLabel(room)} ({room.capacity}인)</div>
+              <div style={{ fontFamily: FONT, fontSize: 11, color: C.blue }}>{current.roomReason}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, color: C.ink600, fontSize: 13 }}>
+              변경 <ChevronRight size={14} color={C.ink600} style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s ease" }} />
+            </div>
+          </button>
+          {open && (
+            <div style={{ marginTop: 8, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", background: C.white, boxShadow: "0 8px 24px rgba(17,24,39,0.08)" }}>
+              {current.availableRooms.map((candidateRoom) => {
+                const selected = candidateRoom.id === room.id;
+                return (
+                  <button
+                    type="button"
+                    key={candidateRoom.id}
+                    onClick={() => { onSelectRoom(candidateRoom.id); setOpen(false); }}
+                    style={{ width: "100%", border: "none", borderBottom: `1px solid ${C.bg2}`, padding: "12px", display: "flex", alignItems: "center", gap: 10, background: selected ? C.blue200 : C.white, cursor: "pointer", textAlign: "left", fontFamily: FONT }}
+                  >
+                    <MapPin size={18} color={selected ? C.blue : C.ink600} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 15, color: C.ink900 }}>{roomLabel(candidateRoom)}</div>
+                      <div style={{ fontSize: 12, color: C.ink500 }}>{candidateRoom.capacity}인 수용</div>
+                    </div>
+                    {selected && <CheckCircleFilled size={18} color={C.blue} />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </>
       ) : (
         <div style={{ color: C.ink500, fontSize: 14 }}>가능한 회의실 없음</div>
       )}
@@ -1432,11 +1504,18 @@ function AdminPanel({ people, setPeople, companySettings, setCompanySettings, ro
           <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             <div style={{ flex: 1 }}>
               <div style={adminLabel}>점심 시작</div>
-              <input type="time" value={hourToTimeStr(companySettings.lunchStart)} onChange={(e) => setCompanySettings((c) => ({ ...c, lunchStart: timeStrToHour(e.target.value) }))} style={adminInputStyle} />
+              <input type="time" value={hourToTimeStr(companySettings.lunchStart)} onChange={(e) => setCompanySettings((c) => {
+                const lunchStart = timeStrToHour(e.target.value);
+                const currentDuration = Math.max(0.5, c.lunchEnd - c.lunchStart);
+                return { ...c, lunchStart, lunchEnd: Math.min(24, lunchStart + currentDuration) };
+              })} style={adminInputStyle} />
             </div>
             <div style={{ flex: 1 }}>
               <div style={adminLabel}>점심 종료</div>
-              <input type="time" value={hourToTimeStr(companySettings.lunchEnd)} onChange={(e) => setCompanySettings((c) => ({ ...c, lunchEnd: timeStrToHour(e.target.value) }))} style={adminInputStyle} />
+              <input type="time" value={hourToTimeStr(companySettings.lunchEnd)} onChange={(e) => setCompanySettings((c) => {
+                const lunchEnd = timeStrToHour(e.target.value);
+                return { ...c, lunchEnd: Math.max(c.lunchStart + 0.5, lunchEnd) };
+              })} style={adminInputStyle} />
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
