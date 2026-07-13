@@ -2101,26 +2101,7 @@ function Sidebar({ people, visibleIds, toggleVisible, onResetAllCalendars, onCre
 
 /* ---------- Calendar grid ---------- */
 
-function CalendarNowIndicator({ top, variant = "day" }) {
-  if (variant === "time") {
-    return (
-      <div
-        aria-hidden
-        style={{
-          position: "absolute",
-          top: top - 5,
-          right: -5,
-          width: 10,
-          height: 10,
-          borderRadius: "50%",
-          background: CURRENT_TIME_COLOR,
-          zIndex: 4,
-          pointerEvents: "none",
-        }}
-      />
-    );
-  }
-
+function CalendarNowIndicator({ top }) {
   return (
     <div
       aria-hidden
@@ -2134,7 +2115,20 @@ function CalendarNowIndicator({ top, variant = "day" }) {
         zIndex: 4,
         pointerEvents: "none",
       }}
-    />
+    >
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: "50%",
+          width: 10,
+          height: 10,
+          borderRadius: "50%",
+          background: CURRENT_TIME_COLOR,
+          transform: "translate(-50%, -50%)",
+        }}
+      />
+    </div>
   );
 }
 
@@ -2392,7 +2386,6 @@ function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, rsvp
                 {hourText(h)}
               </div>
             ))}
-            {showNowIndicator && <CalendarNowIndicator top={nowTop} variant="time" />}
           </div>
           {displayDays.map((day, i) => renderDayColumn(day, i))}
         </div>
