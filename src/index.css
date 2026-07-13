@@ -167,19 +167,19 @@ button.wizard-duration-custom-link {
 }
 
 .calendar-event-reveal--fill {
-  animation: calendar-event-bg-reveal 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
+  animation: calendar-event-bg-reveal 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.85s both;
 }
 
 .calendar-event-reveal--fill .calendar-event-reveal-title {
-  animation: calendar-event-title-reveal 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
+  animation: calendar-event-title-reveal 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.85s both;
 }
 
 .calendar-event-reveal--fill .calendar-event-reveal-sub {
-  animation: calendar-event-sub-reveal 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
+  animation: calendar-event-sub-reveal 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.85s both;
 }
 
 .calendar-event-reveal--line {
-  animation: calendar-event-line-reveal 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
+  animation: calendar-event-line-reveal 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.85s both;
 }
 
 .ai-shimmer-loading-step {

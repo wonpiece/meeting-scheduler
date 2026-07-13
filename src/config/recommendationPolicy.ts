@@ -145,6 +145,10 @@ export interface SlotCandidate {
     afterLunch: boolean;
   };
   hasBackToBack: boolean;
+  /** 추천 조건 — 비선호 시간 배려 적용 여부 */
+  avoidSoftTimes: boolean;
+  /** 추천 조건 — 일정 많은 날/연속 회의 배려 적용 여부 */
+  avoidBusyDays: boolean;
   metrics: CandidateMetrics;
   profileKey?: CandidateProfileKey;
   profileLabel?: string;
@@ -1020,6 +1024,8 @@ export function buildPositiveValidationReasons(input: {
   softTimeFlags: SlotCandidate["softTimeFlags"];
   hasBackToBack: boolean;
   occasion?: MeetingOccasion;
+  avoidSoftTimes?: boolean;
+  avoidBusyDays?: boolean;
 }) {
   const reasons: string[] = [];
 
@@ -1034,10 +1040,12 @@ export function buildPositiveValidationReasons(input: {
     optionalCount,
     allCount,
     bufferOkCount,
-    softPenalty,
     softTimeFlags,
     hasBackToBack,
   } = input;
+
+  const avoidSoftTimes = input.avoidSoftTimes !== false;
+  const avoidBusyDays = input.avoidBusyDays !== false;
 
   const allAvailable =
     allCount > 0 &&
@@ -1070,8 +1078,10 @@ export function buildPositiveValidationReasons(input: {
   }
 
   const bufferThreshold = Math.ceil(allCount * RECOMMENDATION_PHILOSOPHY.bufferOkRatio);
+  // 일정 많은 날 배려가 켜져 있을 때만 전후 버퍼를 근거로 노출
   if (
     input.occasion === "default" &&
+    avoidBusyDays &&
     allCount > 0 &&
     bufferOkCount >= bufferThreshold
   ) {
@@ -1089,15 +1099,23 @@ export function buildPositiveValidationReasons(input: {
     pushUniqueReason(reasons, "퇴근 시간에 맞춰 잡았어요.");
   }
 
-  if (
-    input.occasion === "default" &&
-    softPenalty === 0 &&
-    !softTimeFlags.beforeLeaving &&
-    !softTimeFlags.afterLunch &&
-    !softTimeFlags.justArrived &&
-    !hasBackToBack
-  ) {
-    pushUniqueReason(reasons, "점심·퇴근 1시간 전·바로 앞뒤 회의 시간대가 아니에요.");
+  if (input.occasion === "default") {
+    const comfortParts: string[] = [];
+    const softTimesClear =
+      !softTimeFlags.beforeLeaving &&
+      !softTimeFlags.afterLunch &&
+      !softTimeFlags.justArrived;
+    // 비선호 시간 배려 ON + 해당 구간 회피 시에만
+    if (avoidSoftTimes && softTimesClear) {
+      comfortParts.push("출근 직후", "퇴근 직전", "점심 직후");
+    }
+    // 일정 많은 날 배려 ON + 연속 회의 없을 때만
+    if (avoidBusyDays && !hasBackToBack) {
+      comfortParts.push("바로 앞뒤 회의");
+    }
+    if (comfortParts.length > 0) {
+      pushUniqueReason(reasons, `${comfortParts.join(" · ")} 시간대가 아니에요.`);
+    }
   }
 
   if (input.requiredRoom && input.roomReason) {
@@ -1119,6 +1137,8 @@ export function getValidationReasonInput(candidate: SlotCandidate, roomReason?: 
     softPenalty: candidate.metrics.softPenalty,
     softTimeFlags: candidate.softTimeFlags,
     hasBackToBack: candidate.hasBackToBack,
+    avoidSoftTimes: candidate.avoidSoftTimes,
+    avoidBusyDays: candidate.avoidBusyDays,
     roomReason: roomReason ?? candidate.roomReason,
     requiredRoom: candidate.requiredRoom,
   };
@@ -1468,6 +1488,8 @@ function evaluateSlot(
     checkpoints,
     softTimeFlags: softFlags,
     hasBackToBack,
+    avoidSoftTimes,
+    avoidBusyDays,
     metrics,
     tier,
   };

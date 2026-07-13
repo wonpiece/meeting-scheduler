@@ -327,9 +327,12 @@ const CHECKPOINT_SECTION_HEADER = 54;
 const COORDINATION_SECTION_HEADLINE_HEIGHT = 22;
 const COORDINATION_SECTION_GAP = 12;
 const SECTION_GAP = 40;
-const COORDINATION_SECTION_MARGIN = SECTION_GAP;
-/** 상대 요일 라벨(이번 주 화요일 등) ↔ 추천 사유 목록 */
-const REASON_LIST_MARGIN_TOP = 28;
+/** 상대 요일 라벨(이번 주 금요일 등) 아래 → 추천 사유 / 조율 본문 */
+const BELOW_WEEKDAY_CONTENT_MARGIN = 28;
+/** 제안 모달: 헤더 디바이더 ↔ 「확정 가능 일정」 */
+const RECOMMEND_CONTENT_TOP_PAD = 32;
+const COORDINATION_SECTION_MARGIN = BELOW_WEEKDAY_CONTENT_MARGIN;
+const REASON_LIST_MARGIN_TOP = BELOW_WEEKDAY_CONTENT_MARGIN;
 const CHECKPOINT_SECTION_MARGIN = SECTION_GAP;
 const ROOM_SECTION_MARGIN = SECTION_GAP;
 const ROOM_PICKER_LABEL_HEIGHT = 30;
@@ -371,7 +374,7 @@ function getRecommendationDateSectionHeight(hasCoordinationHint) {
   const pagerH = 20;
   const dateBlockH = 16 + 28 + 8 + 18;
   const hintH = hasCoordinationHint ? 20 : 0;
-  return SECTION_GAP + pagerH + dateBlockH + hintH;
+  return RECOMMEND_CONTENT_TOP_PAD + pagerH + dateBlockH + hintH;
 }
 
 const STORAGE_KEYS = {
@@ -383,7 +386,20 @@ const STORAGE_KEYS = {
   teams: "meeting-scheduler:teams",
   rsvp: "meeting-scheduler:rsvp-v3",
   durationPresets: "meeting-scheduler:duration-presets-v1",
+  recommendSettings: "meeting-scheduler:recommend-settings-v1",
 };
+
+const DEFAULT_RECOMMEND_SETTINGS = {
+  avoidSoftTimes: true,
+  avoidBusyDays: true,
+};
+
+function normalizeRecommendSettings(value) {
+  return {
+    avoidSoftTimes: value?.avoidSoftTimes !== false,
+    avoidBusyDays: value?.avoidBusyDays !== false,
+  };
+}
 
 function readStored(key, fallback) {
   try {
@@ -1058,8 +1074,8 @@ const EMPTY_WIZARD = {
   editGroupId: null,
   basePhase: "title",
   recommendSettingsOpen: false,
-  avoidSoftTimes: true,
-  avoidBusyDays: true,
+  avoidSoftTimes: DEFAULT_RECOMMEND_SETTINGS.avoidSoftTimes,
+  avoidBusyDays: DEFAULT_RECOMMEND_SETTINGS.avoidBusyDays,
 };
 
 function inferDurationPreset(durationMinutes) {
@@ -1369,21 +1385,6 @@ export default function MeetingSchedulerApp() {
   const [wizard, setWizard] = useState(null);
   const [frozenRecommendations, setFrozenRecommendations] = useState(null);
   const [wizardSession, setWizardSession] = useState(0);
-  const openWizard = (initial) => {
-    setWizardSession((session) => session + 1);
-    setFrozenRecommendations(null);
-    setWizard({
-      ...EMPTY_WIZARD,
-      ...initial,
-      dateStr: initial.dateStr ?? getDemoTodayStr(),
-      step: initial.step ?? wizardBaseStep(initial.origin),
-    });
-  };
-  const closeWizard = () => {
-    setWizardSession((session) => session + 1);
-    setFrozenRecommendations(null);
-    setWizard(null);
-  };
   const [detail, setDetail] = useState(null);
   const [toast, setToast] = useState(null);
   const toastIdRef = useRef(0);
@@ -1396,7 +1397,7 @@ export default function MeetingSchedulerApp() {
     highlightClearRef.current = setTimeout(() => {
       setHighlightGroupId(null);
       highlightClearRef.current = null;
-    }, 2000);
+    }, 2600);
   };
   useEffect(() => () => {
     if (highlightClearRef.current) clearTimeout(highlightClearRef.current);
@@ -1423,6 +1424,28 @@ export default function MeetingSchedulerApp() {
   const [rooms, setRooms] = usePersistentState(STORAGE_KEYS.rooms, ROOMS_BASE);
   const [teams, setTeams] = usePersistentState(STORAGE_KEYS.teams, TEAMS_BASE);
   const [jobs, setJobs] = usePersistentState(STORAGE_KEYS.jobs, JOBS_BASE);
+  const [recommendSettings, setRecommendSettings] = usePersistentState(
+    STORAGE_KEYS.recommendSettings,
+    normalizeRecommendSettings(readStored(STORAGE_KEYS.recommendSettings, DEFAULT_RECOMMEND_SETTINGS)),
+  );
+
+  const openWizard = (initial) => {
+    setWizardSession((session) => session + 1);
+    setFrozenRecommendations(null);
+    const savedRecommend = normalizeRecommendSettings(recommendSettings);
+    setWizard({
+      ...EMPTY_WIZARD,
+      ...savedRecommend,
+      ...initial,
+      dateStr: initial.dateStr ?? getDemoTodayStr(),
+      step: initial.step ?? wizardBaseStep(initial.origin),
+    });
+  };
+  const closeWizard = () => {
+    setWizardSession((session) => session + 1);
+    setFrozenRecommendations(null);
+    setWizard(null);
+  };
 
   const showToast = (message, viewDetail) => {
     toastIdRef.current += 1;
@@ -1719,6 +1742,7 @@ export default function MeetingSchedulerApp() {
 
       {wizard && (
         <CreationWizard key={wizardSession} wizard={wizard} setWizard={setWizard} frozenCandidates={frozenRecommendations} setFrozenCandidates={setFrozenRecommendations} stackModalOpen={Boolean(detail)} people={people} jobs={jobs} events={eventsExcludingGroup(events, wizard.editGroupId)} companySettings={companySettings} rooms={rooms} visibleIds={visibleIds} onClose={closeWizard}
+          onRecommendSettingsChange={setRecommendSettings}
           onOpenBlockingEvent={openBlockingEventFromCheckpoint}
           onQuickCreate={(title, dateStr, startHour, durationMinutes, attendeeIds, roomId) => {
             const start = `${dateStr}T${hourToTimeStr(startHour)}:00`;
@@ -2214,7 +2238,8 @@ function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, rsvp
           position: "relative",
           borderLeft: `1px solid ${C.bg2}`,
           minHeight: CALENDAR_BODY_HEIGHT,
-          overflow: "hidden",
+          // 접힌 주말 열만 clip. 평일은 now-indicator 원이 세로선에 걸치도록 visible
+          overflow: isWeekendCol && !showWeekend ? "hidden" : "visible",
           opacity: isWeekendCol && !showWeekend ? 0 : 1,
           pointerEvents: isWeekendCol && !showWeekend ? "none" : "auto",
           transition: `opacity ${CALENDAR_WEEKEND_EXPAND_MS}ms ease`,
@@ -3122,7 +3147,7 @@ function applyWizardTitleChange(wizard, title, companySettings) {
   return next;
 }
 
-function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesProp, setFrozenCandidates: setFrozenCandidatesProp, stackModalOpen = false, people, jobs, events, companySettings, rooms, visibleIds, onClose, onConfirm, onQuickCreate, onOpenBlockingEvent }) {
+function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesProp, setFrozenCandidates: setFrozenCandidatesProp, stackModalOpen = false, people, jobs, events, companySettings, rooms, visibleIds, onClose, onConfirm, onQuickCreate, onOpenBlockingEvent, onRecommendSettingsChange }) {
   const [index, setIndex] = useState(0);
   const pinnedCandidateKeyRef = React.useRef(null);
   const [frozenCandidatesFallback, setFrozenCandidatesFallback] = useState(null);
@@ -3791,7 +3816,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
               <Field label="회의실">
                 <Toggle options={[["필요", true], ["필요없음", false]]} value={roomRequired} onChange={(v) => setWizard({ ...wizard, roomRequired: v, forcedRoomId: v ? wizard.forcedRoomId : null })} />
               </Field>
-              <RecommendationSettingsSection wizard={wizard} setWizard={setWizard} />
+              <RecommendationSettingsSection wizard={wizard} setWizard={setWizard} onRecommendSettingsChange={onRecommendSettingsChange} />
                 </>
               )}
             </div>
@@ -4096,7 +4121,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
               pointerEvents: headerRevealed ? "auto" : "none",
             }}
           >
-            <div style={{ position: "relative", padding: `${MODAL_HEADER_INSET}px ${MODAL_HEADER_INSET}px 20px ${MODAL_HEADER_INSET}px`, borderBottom: `1px solid ${C.bg2}`, zIndex: 2 }}>
+            <div style={{ position: "relative", padding: `${MODAL_HEADER_INSET}px ${MODAL_HEADER_INSET}px 20px ${MODAL_HEADER_INSET}px`, borderBottom: `1px solid ${C.border}`, zIndex: 2, boxSizing: "border-box" }}>
               <span style={{ fontFamily: FONT, fontSize: 15, color: C.ink600, display: "block", paddingRight: 8 }}>
                 {wizard.title} · {Object.keys(wizard.attendees).length}인
                 <span
@@ -4171,7 +4196,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
                 >
                   <div
                     style={{
-                      padding: `${SECTION_GAP}px 24px 0`,
+                      padding: `${RECOMMEND_CONTENT_TOP_PAD}px 24px 0`,
                       display: "flex",
                       flexDirection: "column",
                       boxSizing: "border-box",
@@ -4354,9 +4379,18 @@ function RecommendationSettingCheckbox({ checked, title, description, onToggle }
   );
 }
 
-function RecommendationSettingsSection({ wizard, setWizard }) {
+function RecommendationSettingsSection({ wizard, setWizard, onRecommendSettingsChange }) {
   const open = Boolean(wizard.recommendSettingsOpen);
   const [headerHover, setHeaderHover] = useState(false);
+  const persistRecommendSettings = (patch) => {
+    const next = normalizeRecommendSettings({
+      avoidSoftTimes: wizard.avoidSoftTimes,
+      avoidBusyDays: wizard.avoidBusyDays,
+      ...patch,
+    });
+    setWizard({ ...wizard, ...patch });
+    onRecommendSettingsChange?.(next);
+  };
   return (
     // 상하 호버 패딩은 섹션 gap 40에 포함되지 않도록 상쇄
     <div style={{ marginTop: -14 }}>
@@ -4393,13 +4427,13 @@ function RecommendationSettingsSection({ wizard, setWizard }) {
             checked={wizard.avoidSoftTimes !== false}
             title="비선호 시간 추천 줄이기"
             description="출근 직후, 퇴근 직전, 점심 직후 시간을 낮은 우선순위로 고려해요."
-            onToggle={() => setWizard({ ...wizard, avoidSoftTimes: wizard.avoidSoftTimes === false })}
+            onToggle={() => persistRecommendSettings({ avoidSoftTimes: wizard.avoidSoftTimes === false })}
           />
           <RecommendationSettingCheckbox
             checked={wizard.avoidBusyDays !== false}
             title="일정 많은 날 추천 줄이기"
             description="연속 회의 혹은 미팅이 3개 이상 있는 날을 낮은 우선순위로 고려해요."
-            onToggle={() => setWizard({ ...wizard, avoidBusyDays: wizard.avoidBusyDays === false })}
+            onToggle={() => persistRecommendSettings({ avoidBusyDays: wizard.avoidBusyDays === false })}
           />
         </div>
       )}
