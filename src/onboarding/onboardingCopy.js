@@ -124,7 +124,6 @@ export const MOCK_CANDIDATES = [
     coordinationHeadline: '1건만 조율하면 이 시간으로 확정할 수 있어요.',
     checkpoints: [
       { text: '이예찬님 개인 집중 시간(11:00–11:30) 이동을 요청해 보세요.' },
-      { text: '박준호님은 외부 회의 직후라 5분 늦게 합류할 수 있어요.' },
     ],
     room: { tower: '미르타워', name: '아폴로', capacity: 6 },
   },

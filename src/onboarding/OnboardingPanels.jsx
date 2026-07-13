@@ -1153,7 +1153,6 @@ export function LoadingToConfirmMock({
       : Math.min(maxCssH, CONFIRM_MODAL_NATURAL_H);
   const layoutW = RECOMMEND_MODAL_WIDTH * fitScale;
   const layoutH = layoutCssH * fitScale;
-  const room = candidate.room;
   const confirmConstrained = stage === 'confirm' && layoutCssH + 1 < CONFIRM_MODAL_NATURAL_H;
 
   return (
@@ -1283,13 +1282,15 @@ export function LoadingToConfirmMock({
                     style={{
                       flex: '1 1 auto',
                       minHeight: 0,
-                      overflow: confirmConstrained ? 'hidden' : 'visible',
+                      overflow: 'hidden',
                       opacity: contentIn ? 1 : 0,
                       transform: contentIn ? 'translateY(0)' : 'translateY(12px)',
                       transition: contentIn
                         ? `opacity ${CANDIDATE_FADE_IN_MS}ms ease, transform ${CANDIDATE_FADE_IN_MS}ms cubic-bezier(0.25, 0.1, 0.25, 1)`
                         : `opacity ${CANDIDATE_FADE_OUT_MS}ms ease, transform ${CANDIDATE_FADE_OUT_MS}ms ease`,
                       willChange: 'opacity, transform',
+                      position: 'relative',
+                      zIndex: 0,
                     }}
                   >
                     <div
@@ -1442,49 +1443,6 @@ export function LoadingToConfirmMock({
                           </div>
                         </FlashText>
                       )}
-
-                      {/* RoomPicker closed state */}
-                      {room && (
-                        <div style={{ padding: '0 24px', marginTop: SECTION_GAP }}>
-                          <div
-                            className="modal-section-label"
-                            style={{ color: C.ink900, marginBottom: 12, fontFamily: FONT, fontWeight: 600, fontSize: 15, lineHeight: '20px' }}
-                          >
-                            회의실
-                          </div>
-                          <div
-                            style={{
-                              width: '100%',
-                              border: `1px solid ${C.border}`,
-                              borderRadius: 10,
-                              padding: '14px 12px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              background: C.white,
-                              boxSizing: 'border-box',
-                            }}
-                          >
-                            <div style={{ fontFamily: FONT, fontSize: 15, color: C.black, lineHeight: '20px' }}>
-                              {room.tower} {room.name} ({room.capacity}인)
-                            </div>
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 6,
-                                color: C.ink600,
-                                fontSize: 13,
-                                flexShrink: 0,
-                                fontFamily: FONT,
-                              }}
-                            >
-                              변경
-                              <SvgIcon svg={chevronRightIcon} size={14} color={C.ink500} />
-                            </div>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </div>
 
@@ -1497,6 +1455,9 @@ export function LoadingToConfirmMock({
                       flexShrink: 0,
                       marginTop: 'auto',
                       background: C.white,
+                      position: 'relative',
+                      zIndex: 2,
+                      boxShadow: confirmConstrained ? '0 -8px 16px rgba(255,255,255,0.92)' : undefined,
                     }}
                   >
                     <div
@@ -1670,10 +1631,6 @@ export function CoordinationActionMock({ play = false, instant = false, onComple
           filter: MODAL_DROP_SHADOW,
         }}
       >
-        {showToast && (
-          <MockCopyToast message={MOCK_COORDINATION.toastMessage} leave={phase === 'done'} />
-        )}
-
         <div
           style={{
             position: 'absolute',
@@ -1687,6 +1644,10 @@ export function CoordinationActionMock({ play = false, instant = false, onComple
             flexDirection: 'column',
           }}
         >
+          {showToast && (
+            <MockCopyToast message={MOCK_COORDINATION.toastMessage} leave={phase === 'done'} />
+          )}
+
           <MockPanelShell
             width={RECOMMEND_MODAL_WIDTH}
             height={cssH}
@@ -1711,7 +1672,7 @@ export function CoordinationActionMock({ play = false, instant = false, onComple
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
-              <div style={{ flex: '1 1 auto', minHeight: 0, overflow: constrained ? 'hidden' : 'visible' }}>
+              <div style={{ flex: '1 1 auto', minHeight: 0, overflow: 'hidden', position: 'relative', zIndex: 0 }}>
                 <div
                   style={{
                     padding: `${RECOMMEND_CONTENT_TOP_PAD}px 24px 0`,
@@ -1791,7 +1752,7 @@ export function CoordinationActionMock({ play = false, instant = false, onComple
                   </div>
 
                   {room && (
-                    <div style={{ padding: '0 24px', marginTop: SECTION_GAP }}>
+                    <div style={{ padding: '0 24px', marginTop: SECTION_GAP, marginBottom: 8 }}>
                       <div
                         className="modal-section-label"
                         style={{ color: C.ink900, marginBottom: 12, fontFamily: FONT, fontWeight: 600, fontSize: 15, lineHeight: '20px' }}
@@ -1842,6 +1803,9 @@ export function CoordinationActionMock({ play = false, instant = false, onComple
                   flexShrink: 0,
                   marginTop: 'auto',
                   background: C.white,
+                  position: 'relative',
+                  zIndex: 2,
+                  boxShadow: constrained ? '0 -8px 16px rgba(255,255,255,0.92)' : undefined,
                 }}
               >
                 <div
@@ -1991,11 +1955,11 @@ function MockCopyToast({ message, leave = false }) {
     <div
       style={{
         position: 'absolute',
-        top: 12,
+        top: 76,
         left: '50%',
         transform: visible
           ? 'translate(-50%, 0) scale(1)'
-          : 'translate(-50%, calc(-100% - 20px)) scale(0.96)',
+          : 'translate(-50%, calc(-100% - 12px)) scale(0.96)',
         opacity: visible ? 1 : 0,
         transition: `transform ${slideMs}ms ${leaving ? 'ease-in' : 'ease-out'}, opacity ${slideMs}ms ${leaving ? 'ease-in' : 'ease-out'}`,
         transformOrigin: 'center top',
