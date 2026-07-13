@@ -27,17 +27,8 @@ export const TOUR_STEPS = [
   {
     target: 'create-schedule',
     placement: 'right',
-    text: '버튼을 눌러 일정을 바로 추가할 수 있어요',
-    cta: '다음',
-    dismissOnBackdrop: true,
-  },
-  {
-    target: 'admin-settings',
-    placement: 'left',
-    textLines: [
-      '설정 페이지에서 회사 출/퇴근, 점심시간 및',
-      '구성원 데이터를 변경해 볼 수 있어요',
-    ],
+    title: '회의 일정을 추가해 보세요',
+    textLines: ['참여자, 회의실, 여유 시간을 고려해 최적 일정을 찾아드릴게요.'],
     cta: '확인',
     dismissOnBackdrop: true,
   },

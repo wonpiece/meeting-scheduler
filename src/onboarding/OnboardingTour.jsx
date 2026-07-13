@@ -160,7 +160,7 @@ export default function OnboardingTour({ onComplete }) {
   if (!anchor) return null;
 
   const position = getTooltipPosition(anchor, step.placement);
-  const bodyLines = step.textLines ?? [step.text];
+  const bodyLines = step.textLines ?? (step.text ? [step.text] : []);
 
   return (
     <div
@@ -201,33 +201,37 @@ export default function OnboardingTour({ onComplete }) {
           offsetY={position.arrowOffset}
           gap={position.arrowGap}
         />
-        <div>
-          <div
-            style={{
-              fontFamily: FONT,
-              fontSize: 15,
-              fontWeight: 500,
-              lineHeight: 1.4,
-              color: C.white,
-              marginBottom: 10,
-            }}
-          >
-            {stepIndex + 1} / {total}
-          </div>
-          <div
-            style={{
-              fontFamily: FONT,
-              fontSize: 17,
-              fontWeight: 500,
-              lineHeight: 1.5,
-              color: C.white,
-              wordBreak: 'keep-all',
-            }}
-          >
-            {bodyLines.map((line) => (
-              <div key={line}>{line}</div>
-            ))}
-          </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {step.title && (
+            <div
+              style={{
+                fontFamily: FONT,
+                fontSize: 17,
+                fontWeight: 600,
+                lineHeight: 1.5,
+                color: C.white,
+                wordBreak: 'keep-all',
+              }}
+            >
+              {step.title}
+            </div>
+          )}
+          {bodyLines.length > 0 && (
+            <div
+              style={{
+                fontFamily: FONT,
+                fontSize: 17,
+                fontWeight: 500,
+                lineHeight: 1.5,
+                color: C.white,
+                wordBreak: 'keep-all',
+              }}
+            >
+              {bodyLines.map((line) => (
+                <div key={line}>{line}</div>
+              ))}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'auto' }}>
           <TourButton onClick={advance}>{step.cta}</TourButton>
