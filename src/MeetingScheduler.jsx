@@ -126,6 +126,7 @@ const C = {
   blue: "#3182f6",
   blue200: "#e7f0fe",
   gray100: "#f2f4f6",
+  gray300: "#d1d5db",
   ink900: "#323742",
   ink800: "#4c525d",
   ink600: "#6b7280",
@@ -286,6 +287,8 @@ function WizardAttendeeRow({ person, jobs, isOptional, onToggleOptional, onRemov
 
 const MODAL_WIDTH = 460;
 const RECOMMEND_MODAL_WIDTH = 528;
+const RECOMMEND_PAGER_BTN_SIZE = 36;
+const RECOMMEND_PAGER_GAP = 12;
 const WIZARD_MODAL_MIN_HEIGHT = 560;
 const WIZARD_DETAILS_REVEAL_MAX = 1600;
 const WIZARD_DETAILS_REVEAL_MS = 490;
@@ -487,6 +490,19 @@ function isSameCalendarDay(a, b) {
 }
 function getDemoTodayStr() {
   return dateOnlyStr(new Date());
+}
+
+function getDefaultCustomSchedule(dateStr = getDemoTodayStr()) {
+  const now = new Date();
+  const hasRemainder = now.getMinutes() > 0 || now.getSeconds() > 0 || now.getMilliseconds() > 0;
+  const startHour = Math.min(23, hasRemainder ? now.getHours() + 1 : now.getHours());
+  const endHour = Math.min(24, startHour + 1);
+  return {
+    dateStr,
+    startHour,
+    endHour,
+    durationMinutes: Math.max(30, Math.round((endHour - startHour) * 60)),
+  };
 }
 const fmtAmPmPart = (d, includePeriod = true) => {
   const h = d.getHours();
@@ -742,7 +758,7 @@ function WizardDurationToggle({ dateStr, startHour, endHour, durationMinutes, du
    5. APP
    ============================================================ */
 
-const EMPTY_WIZARD = { step: "base", title: "", dateStr: "2026-07-12", startHour: 10, endHour: 11, durationMinutes: 60, durationPreset: 60, roomRequired: true, forcedRoomId: null, purpose: PURPOSE_DEFAULT, attendees: { yj: "required" }, search: "", editGroupId: null, basePhase: "title" };
+const EMPTY_WIZARD = { step: "base", title: "", dateStr: getDemoTodayStr(), startHour: 10, endHour: 11, durationMinutes: 60, durationPreset: 60, roomRequired: true, forcedRoomId: null, purpose: PURPOSE_DEFAULT, attendees: { yj: "required" }, search: "", editGroupId: null, basePhase: "title" };
 
 function inferDurationPreset(durationMinutes) {
   if (durationMinutes === 60) return 60;
@@ -783,7 +799,7 @@ function wizardFromMeeting(groupId, title, meta) {
 }
 
 function wizardBaseStep(origin) {
-  return origin === "toolbar" ? "quickBase" : "base";
+  return origin === "toolbar" || origin === "calendar" ? "quickBase" : "base";
 }
 
 function returnToBaseWizard(wizard, extra = {}) {
@@ -1014,7 +1030,12 @@ export default function MeetingSchedulerApp() {
   const openWizard = (initial) => {
     setWizardSession((session) => session + 1);
     setFrozenRecommendations(null);
-    setWizard({ ...EMPTY_WIZARD, ...initial });
+    setWizard({
+      ...EMPTY_WIZARD,
+      ...initial,
+      dateStr: initial.dateStr ?? getDemoTodayStr(),
+      step: initial.step ?? wizardBaseStep(initial.origin),
+    });
   };
   const closeWizard = () => {
     setWizardSession((session) => session + 1);
@@ -1291,7 +1312,15 @@ export default function MeetingSchedulerApp() {
         <Sidebar people={people} visibleIds={visibleIds} toggleVisible={toggleVisible} onResetAllCalendars={resetAllCalendarEvents} onCreate={() => openWizard({ step: "quickBase", origin: "toolbar", roomRequired: true })} weekStart={weekStart} onSelectCalendarWeek={selectCalendarWeek} miniCalendarResetKey={miniCalendarResetKey} />
         <CalendarGrid
           people={people} visibleIds={visibleIds} events={events} weekStart={weekStart} showWeekend={showWeekend} setWeekStart={setWeekStart} onGoToday={goToToday} rsvp={rsvp} companySettings={companySettings}
-          onEmptyClick={(day, hour) => openWizard({ origin: "calendar", dateStr: day, startHour: hour, endHour: hour + 1, attendees: { [ME_ID]: "required" } })}
+          onEmptyClick={(day, hour) => openWizard({
+            origin: "calendar",
+            dateStr: day,
+            startHour: hour,
+            endHour: hour + 1,
+            durationMinutes: 60,
+            durationPreset: "custom",
+            attendees: { [ME_ID]: "required" },
+          })}
           onEventClick={(personId, ev) => {
             closeWizard();
             setDetail({ personId, ev });
@@ -1415,6 +1444,7 @@ export default function MeetingSchedulerApp() {
 /* ---------- Sidebar (미니 캘린더 + 캘린더 목록) ---------- */
 
 const MINI_CALENDAR_CELL = 34;
+const SIDEBAR_WIDTH = MINI_CALENDAR_CELL * 7;
 
 function MiniMonthDay({ day, isWeekend, isToday, onClick }) {
   const [hover, setHover] = useState(false);
@@ -1624,8 +1654,25 @@ function Sidebar({ people, visibleIds, toggleVisible, onResetAllCalendars, onCre
   }, [people]);
   const hasOtherVisible = visibleIds.some((id) => id !== ME_ID);
   return (
-    <div style={{ width: 220, flexShrink: 0, display: "flex", flexDirection: "column" }}>
-      <PrimaryButton data-tour="create-schedule" onClick={onCreate} style={{ width: "100%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 28 }}>
+    <div style={{ width: SIDEBAR_WIDTH, minWidth: SIDEBAR_WIDTH, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+      <PrimaryButton
+        data-tour="create-schedule"
+        onClick={onCreate}
+        style={{
+          width: "100%",
+          minWidth: "100%",
+          maxWidth: "100%",
+          boxSizing: "border-box",
+          alignSelf: "stretch",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          marginBottom: 28,
+          padding: "2px 12px",
+          whiteSpace: "nowrap",
+        }}
+      >
         <Plus size={18} /> 일정 추가하기
       </PrimaryButton>
       <MiniMonth weekStart={weekStart} onSelectCalendarWeek={onSelectCalendarWeek} miniCalendarResetKey={miniCalendarResetKey} />
@@ -2006,7 +2053,7 @@ function WizardExitConfirmDialog({ onCancel, onConfirm, zIndex = 60 }) {
   );
 }
 
-function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, animateSize = false, disableBackdropClose = false, exitConfirm, zIndex = 50 }) {
+function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, animateSize = false, disableBackdropClose = false, exitConfirm, zIndex = 50, sideNavLeft = null, sideNavRight = null }) {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
 
   const handleBackdropClick = (event) => {
@@ -2017,6 +2064,33 @@ function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, an
     }
     onClose?.();
   };
+
+  const modalPanel = (
+    <div
+      style={{
+        background: C.white,
+        borderRadius: 24,
+        width,
+        minHeight: minHeight ?? undefined,
+        height: height ?? undefined,
+        maxWidth: "94vw",
+        maxHeight: "88vh",
+        overflow: height != null ? "hidden" : undefined,
+        overflowY: height == null ? "auto" : undefined,
+        overflowX: "hidden",
+        fontFamily: FONT,
+        display: "flex",
+        flexDirection: "column",
+        transition:
+          animateSize && height != null
+            ? `height ${RECOMMEND_MODAL_SIZE_ANIM_MS}ms cubic-bezier(0.4, 0, 0.2, 1), min-height ${RECOMMEND_MODAL_SIZE_ANIM_MS}ms cubic-bezier(0.4, 0, 0.2, 1), width ${RECOMMEND_MODAL_SIZE_ANIM_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`
+            : undefined,
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {children}
+    </div>
+  );
 
   return createPortal(
     <>
@@ -2033,31 +2107,19 @@ function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, an
         }}
         onClick={handleBackdropClick}
       >
-      <div
-        style={{
-          background: C.white,
-          borderRadius: 24,
-          width,
-          minHeight: minHeight ?? undefined,
-          height: height ?? undefined,
-          maxWidth: "94vw",
-          maxHeight: "88vh",
-          overflow: height != null ? "hidden" : undefined,
-          overflowY: height == null ? "auto" : undefined,
-          overflowX: "hidden",
-          fontFamily: FONT,
-          display: "flex",
-          flexDirection: "column",
-          transition:
-            animateSize && height != null
-              ? `height ${RECOMMEND_MODAL_SIZE_ANIM_MS}ms cubic-bezier(0.4, 0, 0.2, 1), min-height ${RECOMMEND_MODAL_SIZE_ANIM_MS}ms cubic-bezier(0.4, 0, 0.2, 1), width ${RECOMMEND_MODAL_SIZE_ANIM_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`
-              : undefined,
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {children}
+        {sideNavLeft || sideNavRight ? (
+          <div
+            style={{ display: "flex", alignItems: "center", gap: RECOMMEND_PAGER_GAP, maxWidth: "100%" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {sideNavLeft}
+            {modalPanel}
+            {sideNavRight}
+          </div>
+        ) : (
+          modalPanel
+        )}
       </div>
-    </div>
       {showExitConfirm && exitConfirm && (
         <WizardExitConfirmDialog
           zIndex={zIndex + 10}
@@ -2511,16 +2573,11 @@ const roomLabel = (r) => `${r.tower} ${r.name}`;
 
 function formatScheduleLabel(dateStr, startHour, durationMinutes, endHour) {
   const d = toDate((dateStr || getDemoTodayStr()) + "T00:00:00");
-  if (startHour == null || endHour == null || durationMinutes === "custom") {
-    return `${d.getMonth() + 1}월 ${d.getDate()}일 · 시간 선택`;
+  const datePart = `${d.getMonth() + 1}월 ${d.getDate()}일`;
+  if (startHour == null || endHour == null) {
+    return `${datePart} · 시간 선택`;
   }
-  const resolvedEnd = endHour ?? startHour + durationMinutes / 60;
-  const startPeriod = startHour < 12 ? "오전" : "오후";
-  const endPeriod = resolvedEnd < 12 ? "오전" : "오후";
-  const sh = startHour % 12 === 0 ? 12 : Math.floor(startHour % 12);
-  const eh = resolvedEnd % 12 === 0 ? 12 : Math.floor(resolvedEnd % 12);
-  const endLabel = endPeriod === startPeriod ? `${eh}시` : `${endPeriod} ${eh}시`;
-  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${startPeriod} ${sh}시~ ${endLabel}`;
+  return `${datePart} ${hourToTimeStr(startHour)}~${hourToTimeStr(endHour)}`;
 }
 const fieldButtonStyle = { height: 46, borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, background: C.white, cursor: "pointer", width: "100%", boxSizing: "border-box", fontFamily: FONT };
 
@@ -3024,20 +3081,27 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
 
   const scheduleLabel = formatScheduleLabel(wizard.dateStr, wizard.startHour, wizard.durationMinutes, wizard.endHour);
 
+  const isManualSchedule = (
+    (wizard.durationPreset === "custom" || wizard.durationMinutes === "custom")
+    && wizard.dateStr
+    && wizard.startHour != null
+    && wizard.endHour != null
+  );
+
   const handleNext = () => {
-    if (wizard.returnToRecommendations) {
-      goToLoading({ refresh: true });
-      return;
-    }
-    if (wizard.origin === "calendar" && isSoloAttendee) {
+    if (isManualSchedule) {
       onQuickCreate(
         wizard.title,
         wizard.dateStr,
         wizard.startHour,
         resolvedDurationMinutes,
         Object.keys(wizard.attendees),
-        wizard.forcedRoomId,
+        wizard.roomRequired ? wizard.forcedRoomId : null,
       );
+      return;
+    }
+    if (wizard.returnToRecommendations) {
+      goToLoading({ refresh: true });
       return;
     }
     if (attendeeCountAll > 0) {
@@ -3126,15 +3190,27 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
                       endHour: startHour + minutes / 60,
                     });
                   }}
-                  onOpenCustom={() => setWizard({
-                    ...wizard,
-                    startHour: wizard.durationPreset === "custom" ? wizard.startHour : null,
-                    endHour: wizard.durationPreset === "custom" ? wizard.endHour : null,
-                    dateStr: wizard.dateStr || getDemoTodayStr(),
-                    durationMinutes: "custom",
-                    durationPreset: "custom",
-                    step: "datetime",
-                  })}
+                  onOpenCustom={() => {
+                    const hasCustomSchedule = wizard.durationPreset === "custom"
+                      && wizard.startHour != null
+                      && wizard.endHour != null;
+                    const schedule = hasCustomSchedule
+                      ? {
+                        dateStr: wizard.dateStr || getDemoTodayStr(),
+                        startHour: wizard.startHour,
+                        endHour: wizard.endHour,
+                        durationMinutes: wizard.durationMinutes === "custom"
+                          ? Math.max(30, Math.round((wizard.endHour - wizard.startHour) * 60))
+                          : wizard.durationMinutes,
+                      }
+                      : getDefaultCustomSchedule();
+                    setWizard({
+                      ...wizard,
+                      ...schedule,
+                      durationPreset: "custom",
+                      step: "datetime",
+                    });
+                  }}
                   onClearCustom={() => {
                     const startHour = wizard.startHour ?? 10;
                     setWizard({
@@ -3357,17 +3433,17 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
   }
 
   if (wizard.step === "loading" || wizard.step === 3) {
-    const pagerBtnStyle = (disabled, side) => ({
-      border: `1px solid ${C.border}`,
-      borderRadius: 6,
-      width: 18,
-      height: 18,
+    const recommendPagerBtnStyle = (disabled, side) => ({
+      border: `1px solid ${C.gray300}`,
+      borderRadius: 8,
+      width: RECOMMEND_PAGER_BTN_SIZE,
+      height: RECOMMEND_PAGER_BTN_SIZE,
       padding: 0,
       flexShrink: 0,
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      background: !disabled && pagerHover === side ? C.bg2 : "none",
+      background: !disabled && pagerHover === side ? C.bg2 : C.white,
       cursor: disabled ? "default" : "pointer",
       opacity: disabled ? 0.35 : 1,
       transition: "background 0.15s ease",
@@ -3377,6 +3453,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
       ? (recommendationLayout?.modalHeight ?? WIZARD_MODAL_MIN_HEIGHT)
       : WIZARD_MODAL_MIN_HEIGHT;
     const modalWidth = headerRevealed ? RECOMMEND_MODAL_WIDTH : MODAL_WIDTH;
+    const showRecommendPager = headerRevealed && resultsEntering && candidates.length > 0;
 
     return (
       <>
@@ -3388,6 +3465,32 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
         animateSize={headerRevealed && !resultsEntering}
         disableBackdropClose={disableBackdropClose}
         exitConfirm={wizardExitConfirm}
+        sideNavLeft={showRecommendPager ? (
+          <button
+            type="button"
+            aria-label="이전 제안"
+            onClick={() => setIndex((i) => Math.max(0, i - 1))}
+            disabled={index === 0}
+            onMouseEnter={() => setPagerHover("left")}
+            onMouseLeave={() => setPagerHover(null)}
+            style={recommendPagerBtnStyle(index === 0, "left")}
+          >
+            <ChevronLeft size={14} color={C.ink900} />
+          </button>
+        ) : null}
+        sideNavRight={showRecommendPager ? (
+          <button
+            type="button"
+            aria-label="다음 제안"
+            onClick={() => setIndex((i) => Math.min(candidates.length - 1, i + 1))}
+            disabled={index === candidates.length - 1}
+            onMouseEnter={() => setPagerHover("right")}
+            onMouseLeave={() => setPagerHover(null)}
+            style={recommendPagerBtnStyle(index === candidates.length - 1, "right")}
+          >
+            <ChevronRight size={14} color={C.ink900} />
+          </button>
+        ) : null}
       >
         <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         {/* 로딩 헤더 → 제안 헤더 morph */}
@@ -3494,11 +3597,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
                       <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: currentRequiredMet ? C.blue : C.ink900 }}>
                         {currentRequiredMet ? "확정 가능 일정" : "확인 필요 일정"}
                       </span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <button onClick={() => setIndex((i) => Math.max(0, i - 1))} disabled={index === 0} onMouseEnter={() => setPagerHover("left")} onMouseLeave={() => setPagerHover(null)} style={pagerBtnStyle(index === 0, "left")}><ChevronLeft size={12} color={C.ink900} /></button>
-                        <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{index + 1} / {candidates.length}</span>
-                        <button onClick={() => setIndex((i) => Math.min(candidates.length - 1, i + 1))} disabled={index === candidates.length - 1} onMouseEnter={() => setPagerHover("right")} onMouseLeave={() => setPagerHover(null)} style={pagerBtnStyle(index === candidates.length - 1, "right")}><ChevronRight size={12} color={C.ink900} /></button>
-                      </div>
+                      <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{index + 1} / {candidates.length}</span>
                     </div>
                     <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
                       <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 21, color: C.black }}>{current.start.getMonth() + 1}월 {current.start.getDate()}일 {fmtAmPmRange(current.start, current.end)}</div>
