@@ -421,15 +421,16 @@ function isHardConflict(event: CalendarEvent) {
   return event.type === "meeting" || (!event.movable && event.type !== "lunch");
 }
 
-/** 1인 미팅·집중 시간 등 — 옮길 수 있는 블록 */
+/** 1인 미팅·집중 시간 등 — 옮길 수 있는 블록 (2명 이상 미팅은 조율 비용이 높아 제외) */
 function isEffectivelyMovable(event: CalendarEvent) {
-  if (event.movable) return true;
   if (event.type === "focus") return true;
+
+  const attendeeCount = countCalendarEventAttendees(event);
+  if (attendeeCount >= 2) return false;
+
+  if (event.movable) return true;
   if (event.type !== "meeting") return false;
-  if (event.meetingMeta) {
-    const attendeeCount = event.meetingMeta.requiredIds.length + event.meetingMeta.optionalIds.length;
-    return attendeeCount <= 1;
-  }
+  if (event.meetingMeta) return attendeeCount <= 1;
   if (event.title?.includes("1:1")) return true;
   return !event.groupId;
 }
@@ -858,10 +859,14 @@ export function buildCheckpoints(input: {
   });
   if (hasBackToBack && backToBackIds.length > 0) {
     if (backToBackIds.includes(organizerId)) {
+      const organizer = people.find((p) => p.id === organizerId);
+      const organizerLabel = organizer
+        ? `${personFirstName(organizer.name)}님`
+        : "주선자";
       checkpoints.push({
         type: "back_to_back_meeting",
         targetPersonId: organizerId,
-        title: "바로 다음 회의 있음",
+        title: `${organizerLabel} 바로 다음 회의 있음`,
         description: "참여해야 하는 안건을 먼저 논의하고, 다음 회의에 늦지 않도록 시간을 맞춰 보세요.",
       });
     }
@@ -1886,5 +1891,5 @@ export function buildCoordinationDraftMessage(input: {
   const blockingRange = formatShortScheduleRange(input.blockingStart, input.blockingEnd);
   const proposedRange = formatShortScheduleRange(input.proposedStart, input.proposedEnd);
   const proposedTitle = input.proposedTitle.trim() || "새 일정";
-  return `${owner}님, 안녕하세요! ${proposedTitle}(${proposedRange}) 미팅을 잡으려는데 ${input.blockingTitle}(${blockingRange}) 일정과 겹쳐요. 혹시 ${input.blockingTitle} 일정을 다른 시간으로 옮기는게 가능할까요?`;
+  return `${owner}님, 안녕하세요! ${proposedTitle}(${proposedRange}) 회의를 잡으려는데 ${input.blockingTitle}(${blockingRange}) 일정과 겹쳐요. 혹시 ${input.blockingTitle} 일정을 다른 시간으로 옮기는 게 가능할까요?`;
 }

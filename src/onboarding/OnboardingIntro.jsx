@@ -619,11 +619,11 @@ export default function OnboardingIntro({ exiting = false, onStartReveal, onExit
 
             {scene === SCENE.factors && (
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, width: '100%' }}>
-                <Subtitle show={scene1.step >= 1}>회의 주선자는 회의 일정을 잡을 시</Subtitle>
+                <Subtitle show={scene1.step >= 1}>회의 주선자는 회의 일정을 잡을 때</Subtitle>
                 <div style={{ marginTop: SUBTITLE_HEADLINE_GAP, paddingBottom: HEADLINE_BOTTOM_PAD }}>
                   <Headline show={scene1.step >= 2}>
                     <span style={{ color: C.blue500 }}>필수 요소</span>
-                    와{'  '}
+                    와{' '}
                     <span style={{ color: C.blue500 }}>정성 요소</span>
                     를 고려해서 일정을 잡아요
                   </Headline>
@@ -657,7 +657,7 @@ export default function OnboardingIntro({ exiting = false, onStartReveal, onExit
                 <Subtitle show={scene3.step >= 1}>결국</Subtitle>
                 <div style={{ marginTop: SUBTITLE_HEADLINE_GAP, display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {scene3.step >= 2 && (
-                    <AppearHeadline>회의를 주선할 때 마다</AppearHeadline>
+                    <AppearHeadline>회의를 주선할 때마다</AppearHeadline>
                   )}
                   {scene3.step >= 3 && (
                     <AppearHeadline>

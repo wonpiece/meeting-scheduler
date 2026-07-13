@@ -22,11 +22,11 @@ export const FACTOR_COPY = {
   required: {
     label: '필수 요소',
     title: '회의 성사에 필요한 요소',
-    detail: '참여자, 시간과 장소',
+    detail: '참석자, 시간과 장소',
   },
   soft: {
     label: '정성 요소',
-    title: '회의 참여자의 집중을 돕는 요소',
+    title: '회의 참석자의 집중을 돕는 요소',
     detail: '연속 회의, 출근 직후, 점심 직후 부담',
   },
 };
@@ -96,7 +96,7 @@ export const MOCK_CANDIDATES = [
       '점심·출근 직후를 피해 부담이 적은 시간이에요.',
     ],
     references: [
-      { title: '박준호님', description: '오전에 집중 블록이 있어요. 확정하면 캘린더에 표시해 둘게요.' },
+      { title: '박도윤님 회의 3건 이상', description: '집중력이 떨어질 수 있으니 회의가 끝난 뒤 결정된 사항을 정리해서 공유해 보세요.' },
     ],
     room: { tower: '미르타워', name: '아폴로', capacity: 6 },
   },
@@ -112,7 +112,7 @@ export const MOCK_CANDIDATES = [
       '퇴근 직전을 피해 부담이 적은 시간이에요.',
     ],
     references: [
-      { title: '염은솔님', description: '앞에 짧은 1:1이 있지만 회의 전에 끝낼 수 있어요.' },
+      { title: '퇴근 직전 시간', description: '정해진 회의 시간을 지키고, 남은 안건은 회의 후 비동기로 정리해 보세요.' },
     ],
     room: { tower: '솔라타워', name: '비너스', capacity: 8 },
   },
@@ -121,11 +121,10 @@ export const MOCK_CANDIDATES = [
     statusLabel: '확인 필요 일정',
     dateLabel: '7월 17일 오전 11시~12시',
     weekdayLabel: '이번 주 목요일',
-    coordinationHint: '이예찬님 일정과 겹쳐 조율이 필요해요.',
-    coordinationHeadline: '1건만 조율하면 확정할 수 있어요.',
+    coordinationHeadline: '1건만 조율하면 이 시간으로 확정할 수 있어요.',
     checkpoints: [
       { text: '이예찬님 개인 집중 시간(11:00–11:30) 이동을 요청해 보세요.' },
-      { text: '박준호님은 외부 미팅 직후라 5분 늦게 합류할 수 있어요.' },
+      { text: '박준호님은 외부 회의 직후라 5분 늦게 합류할 수 있어요.' },
     ],
     room: { tower: '미르타워', name: '아폴로', capacity: 6 },
   },
@@ -140,7 +139,7 @@ const MOCK_PROPOSED_END = new Date(2026, 6, 17, 12, 0, 0);
 export const MOCK_COORDINATION = {
   eventTitle: '개인 집중 시간',
   dateLabel: '7월 17일 (목)',
-  timeLabel: '오전 11:00 - 11:30',
+  timeLabel: '오전 11:00–11:30',
   owner: {
     id: 'yc',
     name: '이예찬',
@@ -167,7 +166,7 @@ export const TOUR_STEPS = [
     target: 'create-schedule',
     placement: 'right',
     title: '회의 일정을 추가해 보세요',
-    textLines: ['참여자, 회의실, 여유 시간을 고려해 확정 가능한 시간을 찾아드릴게요.'],
+    textLines: ['참석자, 회의실, 여유 시간을 고려해 확정할 수 있는 시간을 찾아드릴게요.'],
     cta: '확인',
     dismissOnBackdrop: true,
   },
