@@ -563,11 +563,17 @@ function PrimaryButton({ children, onClick, disabled, style, type = "button", co
         color: C.white,
         border: "none",
         borderRadius: 10,
-        height: compact ? 42 : 46,
-        padding: compact ? "2px 12px" : "2px 32px",
+        height: compact ? 42 : 48,
+        minHeight: compact ? 42 : 48,
+        padding: compact ? "0 12px" : "0 32px",
+        boxSizing: "border-box",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
         fontFamily: FONT,
         fontWeight: 500,
         fontSize: 17,
+        lineHeight: 1,
         cursor: disabled ? "default" : "pointer",
         opacity: disabled ? 0.3 : 1,
         minWidth: compact ? 120 : 140,
@@ -1937,6 +1943,8 @@ function Sidebar({ people, visibleIds, toggleVisible, onResetAllCalendars, onCre
           width: "100%",
           minWidth: "100%",
           maxWidth: "100%",
+          height: 52,
+          minHeight: 52,
           boxSizing: "border-box",
           alignSelf: "stretch",
           display: "flex",
@@ -1944,11 +1952,13 @@ function Sidebar({ people, visibleIds, toggleVisible, onResetAllCalendars, onCre
           justifyContent: "center",
           gap: 8,
           marginBottom: 28,
-          padding: "2px 12px",
+          padding: "0 16px",
+          lineHeight: 1,
           whiteSpace: "nowrap",
         }}
       >
-        <Plus size={18} /> 일정 추가하기
+        <Plus size={18} color={C.white} />
+        <span style={{ lineHeight: 1 }}>일정 추가하기</span>
       </PrimaryButton>
       <MiniMonth weekStart={weekStart} onSelectCalendarWeek={onSelectCalendarWeek} miniCalendarResetKey={miniCalendarResetKey} />
       <div style={{ marginTop: 40 }}>
