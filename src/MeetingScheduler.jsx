@@ -3007,10 +3007,6 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
     () => getRecommendationWeekDays(getDemoTodayStr(), WEEK_DAYS),
     [],
   );
-  const recommendationNotBefore = useMemo(
-    () => toDate(`${getDemoTodayStr()}T${hourToTimeStr(normalizedCompanySettings.commuteIn)}:00`),
-    [normalizedCompanySettings.commuteIn],
-  );
 
   const request = useMemo(
     () => buildRecommendationRequest({
@@ -3035,11 +3031,14 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
     organizerId: ME_ID,
     roomEvents: ROOM_EVENTS,
     fallbackRooms: ROOMS_BASE,
-    notBefore: recommendationNotBefore,
-  }), [recommendationNotBefore]);
+  }), []);
 
   const buildCandidates = React.useCallback(
-    () => generateCandidates(request, people, events, normalizedCompanySettings, rooms, candidateGenerationOptions),
+    () => generateCandidates(request, people, events, normalizedCompanySettings, rooms, {
+      ...candidateGenerationOptions,
+      // 현재 시각 이전 슬롯은 추천하지 않음 (출근 시각이 아닌 now 기준)
+      notBefore: new Date(),
+    }),
     [request, people, events, normalizedCompanySettings, rooms, candidateGenerationOptions],
   );
 
