@@ -355,6 +355,7 @@ const STORAGE_KEYS = {
   rooms: "meeting-scheduler:rooms",
   teams: "meeting-scheduler:teams",
   rsvp: "meeting-scheduler:rsvp-v3",
+  durationPresets: "meeting-scheduler:duration-presets-v1",
 };
 
 function readStored(key, fallback) {
@@ -399,6 +400,19 @@ function useNowMinute() {
 
 function getTimeOfDayTop(now) {
   return (now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600) * HOUR_HEIGHT;
+}
+
+function getCalendarInitialScrollTop(now, companySettings) {
+  const currentHour = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
+  const commuteIn = companySettings?.commuteIn ?? DEFAULT_COMPANY_SETTINGS.commuteIn;
+  const commuteOut = companySettings?.commuteOut ?? DEFAULT_COMPANY_SETTINGS.commuteOut;
+  const inWorkHours = currentHour >= commuteIn && currentHour < commuteOut;
+  if (inWorkHours) {
+    // 업무 시간: 출근 시각을 상단 근처에 두고, 위로 16px 여백을 남겨 이전 구간이 살짝 보이게
+    return Math.max(0, commuteIn * HOUR_HEIGHT - CALENDAR_NOW_SCROLL_TOP_OFFSET);
+  }
+  // 업무 외: 현재 시각 기준 스크롤 유지
+  return Math.max(0, getTimeOfDayTop(now) - CALENDAR_NOW_SCROLL_TOP_OFFSET);
 }
 
 const CURRENT_TIME_COLOR = "#ea4335";
@@ -648,12 +662,201 @@ function Toggle({ options, value, onChange }) {
   );
 }
 
+function formatDurationPresetLabel(minutes) {
+  if (minutes % 60 === 0) return `${minutes / 60}시간`;
+  return `${minutes}분`;
+}
+
+const MAX_CUSTOM_DURATION_PRESETS = 5;
+const BUILTIN_DURATION_PRESETS = new Set([30, 60]);
+
+function normalizeDurationPresets(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const next = [];
+  for (const item of value) {
+    const minutes = Math.round(Number(item));
+    if (!Number.isFinite(minutes) || minutes < 1) continue;
+    if (BUILTIN_DURATION_PRESETS.has(minutes)) continue;
+    if (seen.has(minutes)) continue;
+    seen.add(minutes);
+    next.push(minutes);
+    if (next.length >= MAX_CUSTOM_DURATION_PRESETS) break;
+  }
+  return next;
+}
+
+function pushDurationPreset(list, minutes) {
+  const normalized = Math.round(Number(minutes));
+  if (!Number.isFinite(normalized) || normalized < 1) return normalizeDurationPresets(list);
+  if (BUILTIN_DURATION_PRESETS.has(normalized)) return normalizeDurationPresets(list);
+  return normalizeDurationPresets([normalized, ...normalizeDurationPresets(list)]);
+}
+
+function DurationInputDialog({ onClose, onConfirm, zIndex = 70 }) {
+  const [hours, setHours] = useState("");
+  const [mins, setMins] = useState("");
+  const hoursInputRef = useRef(null);
+
+  useEffect(() => {
+    hoursInputRef.current?.focus();
+  }, []);
+
+  const hoursNum = hours === "" ? 0 : Number(hours);
+  const minsNum = mins === "" ? 0 : Number(mins);
+  const totalMinutes = Math.round(hoursNum * 60 + minsNum);
+  const canConfirm = Number.isFinite(hoursNum) && Number.isFinite(minsNum)
+    && hoursNum >= 0 && minsNum >= 0
+    && totalMinutes >= 1;
+
+  const confirm = () => {
+    if (!canConfirm) return;
+    onConfirm(totalMinutes);
+  };
+
+  const sanitizeInt = (raw) => raw.replace(/[^\d]/g, "");
+
+  const unitLabelStyle = {
+    flexShrink: 0,
+    fontFamily: FONT,
+    fontWeight: 500,
+    fontSize: 15,
+    fontStyle: "normal",
+    color: C.ink800,
+    lineHeight: "20px",
+  };
+
+  const inputStyle = {
+    flex: 1,
+    minWidth: 0,
+    width: "100%",
+    height: 36,
+    borderRadius: 8,
+    border: `1px solid ${C.border}`,
+    padding: "0 12px",
+    fontFamily: FONT,
+    fontWeight: 500,
+    fontSize: 15,
+    color: C.ink900,
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const unitGroupStyle = {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    flex: "1 1 0",
+    minWidth: 0,
+  };
+
+  return createPortal(
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex,
+        background: "rgba(17,24,39,0.25)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="duration-input-dialog-title"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: C.white,
+          borderRadius: 24,
+          width: 280,
+          maxWidth: "94vw",
+          padding: 20,
+          boxSizing: "border-box",
+        }}
+      >
+        <div
+          id="duration-input-dialog-title"
+          style={{
+            fontFamily: FONT,
+            fontWeight: 600,
+            fontSize: 17,
+            color: C.ink900,
+            textAlign: "left",
+            lineHeight: 1.4,
+          }}
+        >
+          소요 시간을 입력해 주세요
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16, width: "100%" }}>
+          <div style={unitGroupStyle}>
+            <input
+              ref={hoursInputRef}
+              type="text"
+              inputMode="numeric"
+              aria-label="시간"
+              value={hours}
+              onChange={(e) => setHours(sanitizeInt(e.target.value))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  confirm();
+                }
+              }}
+              style={inputStyle}
+            />
+            <span style={unitLabelStyle}>시간</span>
+          </div>
+          <div style={unitGroupStyle}>
+            <input
+              type="text"
+              inputMode="numeric"
+              aria-label="분"
+              value={mins}
+              onChange={(e) => setMins(sanitizeInt(e.target.value))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  confirm();
+                }
+              }}
+              style={inputStyle}
+            />
+            <span style={unitLabelStyle}>분</span>
+          </div>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <PrimaryButton compact disabled={!canConfirm} onClick={confirm} style={{ width: "100%", minWidth: 0 }}>
+            확인
+          </PrimaryButton>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function WizardDurationToggle({ dateStr, startHour, endHour, durationMinutes, durationPreset, onSelectPreset, onOpenCustom, onClearCustom }) {
   const [hoverKey, setHoverKey] = useState(null);
+  const [showDurationInput, setShowDurationInput] = useState(false);
+  const [customDurationPresets, setCustomDurationPresets] = usePersistentState(
+    STORAGE_KEYS.durationPresets,
+    [],
+  );
+  const savedPresets = normalizeDurationPresets(customDurationPresets);
   const customReady = durationPreset === "custom" && startHour != null && endHour != null;
   const customLabel = customReady
     ? formatScheduleLabel(dateStr, startHour, durationMinutes, endHour)
     : null;
+  const selectedCustomMinutes = typeof durationPreset === "number" && !BUILTIN_DURATION_PRESETS.has(durationPreset)
+    ? durationPreset
+    : null;
+  const visibleCustomPresets = selectedCustomMinutes != null && !savedPresets.includes(selectedCustomMinutes)
+    ? [selectedCustomMinutes, ...savedPresets].slice(0, MAX_CUSTOM_DURATION_PRESETS)
+    : savedPresets;
 
   const pillStyle = (selected, hoverLabel) => ({
     height: 36,
@@ -669,88 +872,136 @@ function WizardDurationToggle({ dateStr, startHour, endHour, durationMinutes, du
     transition: "background 0.15s ease",
   });
 
-  return (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-      <button
-        type="button"
-        onClick={() => onSelectPreset(60)}
-        onMouseEnter={() => setHoverKey("1시간")}
-        onMouseLeave={() => setHoverKey(null)}
-        style={pillStyle(durationPreset === 60, "1시간")}
+  if (customReady) {
+    return (
+      <div
+        style={{
+          height: 36,
+          borderRadius: 8,
+          padding: "0 8px 0 12px",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          background: C.blue200,
+          color: C.blue,
+        }}
       >
-        1시간
-      </button>
-      <button
-        type="button"
-        onClick={() => onSelectPreset(30)}
-        onMouseEnter={() => setHoverKey("30분")}
-        onMouseLeave={() => setHoverKey(null)}
-        style={pillStyle(durationPreset === 30, "30분")}
-      >
-        30분
-      </button>
-      {customReady ? (
-        <div
-          style={{
-            height: 36,
-            borderRadius: 8,
-            padding: "0 8px 0 12px",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            background: C.blue200,
-            color: C.blue,
-          }}
-        >
-          <button
-            type="button"
-            onClick={onOpenCustom}
-            style={{
-              background: "none",
-              border: "none",
-              padding: 0,
-              margin: 0,
-              fontFamily: FONT,
-              fontWeight: 500,
-              fontSize: 15,
-              color: C.blue,
-              cursor: "pointer",
-              lineHeight: "20px",
-            }}
-          >
-            {customLabel}
-          </button>
-          <button
-            type="button"
-            aria-label="직접 선택 시간 초기화"
-            onClick={onClearCustom}
-            style={{
-              background: "none",
-              border: "none",
-              padding: 2,
-              margin: 0,
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              lineHeight: 0,
-            }}
-          >
-            <X size={14} color={C.blue} />
-          </button>
-        </div>
-      ) : (
         <button
           type="button"
           onClick={onOpenCustom}
-          onMouseEnter={() => setHoverKey("직접 선택")}
-          onMouseLeave={() => setHoverKey(null)}
-          style={pillStyle(false, "직접 선택")}
+          style={{
+            background: "none",
+            border: "none",
+            padding: 0,
+            margin: 0,
+            fontFamily: FONT,
+            fontWeight: 500,
+            fontSize: 15,
+            color: C.blue,
+            cursor: "pointer",
+            lineHeight: "20px",
+          }}
         >
-          직접 선택
+          {customLabel}
         </button>
+        <button
+          type="button"
+          aria-label="직접 선택 시간 초기화"
+          onClick={onClearCustom}
+          style={{
+            background: "none",
+            border: "none",
+            padding: 2,
+            margin: 0,
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            lineHeight: 0,
+          }}
+        >
+          <X size={14} color={C.blue} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 12 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            type="button"
+            onClick={() => onSelectPreset(60)}
+            onMouseEnter={() => setHoverKey("1시간")}
+            onMouseLeave={() => setHoverKey(null)}
+            style={pillStyle(durationPreset === 60, "1시간")}
+          >
+            1시간
+          </button>
+          <button
+            type="button"
+            onClick={() => onSelectPreset(30)}
+            onMouseEnter={() => setHoverKey("30분")}
+            onMouseLeave={() => setHoverKey(null)}
+            style={pillStyle(durationPreset === 30, "30분")}
+          >
+            30분
+          </button>
+          {visibleCustomPresets.map((minutes) => (
+            <button
+              key={minutes}
+              type="button"
+              onClick={() => onSelectPreset(minutes)}
+              onMouseEnter={() => setHoverKey(`custom-${minutes}`)}
+              onMouseLeave={() => setHoverKey(null)}
+              style={pillStyle(durationPreset === minutes, `custom-${minutes}`)}
+            >
+              {formatDurationPresetLabel(minutes)}
+            </button>
+          ))}
+          <button
+            type="button"
+            aria-label="소요 시간 직접 입력"
+            onClick={() => setShowDurationInput(true)}
+            onMouseEnter={() => setHoverKey("add-duration")}
+            onMouseLeave={() => setHoverKey(null)}
+            style={{
+              ...pillStyle(false, "add-duration"),
+              width: 36,
+              padding: 0,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Plus size={16} color={C.ink900} />
+          </button>
+        </div>
+        <div
+          style={{
+            fontFamily: FONT,
+            fontWeight: 400,
+            fontSize: 13,
+            fontStyle: "normal",
+            color: C.ink500,
+            lineHeight: "18px",
+          }}
+        >
+          적절한 시간을 찾아드려요.
+        </div>
+      </div>
+      {showDurationInput && (
+        <DurationInputDialog
+          onClose={() => setShowDurationInput(false)}
+          onConfirm={(minutes) => {
+            setCustomDurationPresets((prev) => pushDurationPreset(prev, minutes));
+            onSelectPreset(minutes);
+            setShowDurationInput(false);
+          }}
+        />
       )}
-    </div>
+    </>
   );
 }
 
@@ -763,6 +1014,7 @@ const EMPTY_WIZARD = { step: "base", title: "", dateStr: getDemoTodayStr(), star
 function inferDurationPreset(durationMinutes) {
   if (durationMinutes === 60) return 60;
   if (durationMinutes === 30) return 30;
+  if (typeof durationMinutes === "number" && durationMinutes > 0) return durationMinutes;
   return "custom";
 }
 
@@ -901,8 +1153,31 @@ function WizardDatetimeStep({ wizard, setWizard, onClose, disableBackdropClose, 
         </Field>
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "20px 24px 24px 24px", marginTop: "auto" }}>
-        <SecondaryButton compact onClick={() => setWizard(returnToBaseWizard(wizard))}>이전</SecondaryButton>
-        <PrimaryButton compact disabled={!datetimeReady} onClick={() => setWizard(returnToBaseWizard(wizard, { durationPreset: "custom" }))}>확인</PrimaryButton>
+        <SecondaryButton
+          compact
+          onClick={() => {
+            if (wizard.durationRestore) {
+              setWizard(returnToBaseWizard(wizard, {
+                ...wizard.durationRestore,
+                durationRestore: undefined,
+              }));
+              return;
+            }
+            setWizard(returnToBaseWizard(wizard));
+          }}
+        >
+          이전
+        </SecondaryButton>
+        <PrimaryButton
+          compact
+          disabled={!datetimeReady}
+          onClick={() => setWizard(returnToBaseWizard(wizard, {
+            durationPreset: "custom",
+            durationRestore: undefined,
+          }))}
+        >
+          확인
+        </PrimaryButton>
       </div>
     </Overlay>
   );
@@ -1754,9 +2029,9 @@ function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, setW
   React.useEffect(() => {
     if (!scrollRef.current || didInitialScrollRef.current) return;
     const el = scrollRef.current;
-    el.scrollTop = Math.max(0, getTimeOfDayTop(new Date()) - CALENDAR_NOW_SCROLL_TOP_OFFSET);
+    el.scrollTop = getCalendarInitialScrollTop(new Date(), companySettings);
     didInitialScrollRef.current = true;
-  }, []);
+  }, [companySettings.commuteIn, companySettings.commuteOut]);
 
   const displayDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const displayDays = displayDates.map(dateOnlyStr);
@@ -2627,15 +2902,10 @@ function FieldNavButton({ onClick, children }) {
 function applyWizardTitleChange(wizard, title, companySettings) {
   const defaults = getOccasionScheduleDefaults(title, companySettings, wizard.durationMinutes);
   const next = { ...wizard, title };
+  // 점심/회식 제목이면 회의실만 자동 해제. 시간 자동 설정은 하지 않음.
   if (defaults.occasion !== "default") {
     next.roomRequired = false;
     next.forcedRoomId = null;
-    next.durationPreset = "custom";
-    if (defaults.startHour != null) next.startHour = defaults.startHour;
-    if (defaults.durationMinutes != null) {
-      next.durationMinutes = defaults.durationMinutes;
-      next.endHour = defaults.startHour + defaults.durationMinutes / 60;
-    }
   }
   return next;
 }
@@ -3153,7 +3423,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
             <div style={wizardDetailsRevealStyle(detailsRevealed)}>
               {detailsRevealed && (
                 <>
-              <Field label="참석자">
+              <Field label="참석자" labelSuffix={attendeeCountAll}>
                 <FieldNavButton onClick={openAttendeesStep}>
                   <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: C.ink500, flex: 1, textAlign: "left" }}>참석자 찾기</span>
                   <Search size={18} color={C.ink500} />
@@ -3173,7 +3443,63 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
                   </div>
                 )}
               </Field>
-              <Field label="시간">
+              <Field
+                label="소요시간"
+                action={(
+                  <button
+                    type="button"
+                    className="wizard-duration-custom-link"
+                    onClick={() => {
+                      const hasCustomSchedule = wizard.durationPreset === "custom"
+                        && wizard.startHour != null
+                        && wizard.endHour != null;
+                      const schedule = hasCustomSchedule
+                        ? {
+                          dateStr: wizard.dateStr || getDemoTodayStr(),
+                          startHour: wizard.startHour,
+                          endHour: wizard.endHour,
+                          durationMinutes: wizard.durationMinutes === "custom"
+                            ? Math.max(30, Math.round((wizard.endHour - wizard.startHour) * 60))
+                            : wizard.durationMinutes,
+                        }
+                        : getDefaultCustomSchedule();
+                      setWizard({
+                        ...wizard,
+                        ...schedule,
+                        durationPreset: "custom",
+                        durationRestore: {
+                          dateStr: wizard.dateStr,
+                          startHour: wizard.startHour,
+                          endHour: wizard.endHour,
+                          durationMinutes: wizard.durationMinutes,
+                          durationPreset: wizard.durationPreset ?? inferDurationPreset(wizard.durationMinutes),
+                        },
+                        step: "datetime",
+                      });
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      margin: 0,
+                      flexShrink: 0,
+                      fontFamily: FONT,
+                      fontWeight: 400,
+                      fontSize: 14,
+                      fontStyle: "normal",
+                      fontSynthesis: "none",
+                      color: C.ink600,
+                      textDecoration: "underline",
+                      textDecorationThickness: 1,
+                      textUnderlineOffset: 2,
+                      cursor: "pointer",
+                      lineHeight: "20px",
+                    }}
+                  >
+                    직접 선택
+                  </button>
+                )}
+              >
                 <WizardDurationToggle
                   dateStr={wizard.dateStr}
                   startHour={wizard.startHour}
@@ -3208,6 +3534,13 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
                       ...wizard,
                       ...schedule,
                       durationPreset: "custom",
+                      durationRestore: {
+                        dateStr: wizard.dateStr,
+                        startHour: wizard.startHour,
+                        endHour: wizard.endHour,
+                        durationMinutes: wizard.durationMinutes,
+                        durationPreset: wizard.durationPreset ?? inferDurationPreset(wizard.durationMinutes),
+                      },
                       step: "datetime",
                     });
                   }}
@@ -3270,7 +3603,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
                   <Search size={18} color={C.ink500} />
                 </button>
               </Field>
-              <Field label="참석자">
+              <Field label="참석자" labelSuffix={attendeeCountAll}>
                 <FieldNavButton onClick={openAttendeesStep}>
                   <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: C.ink500, flex: 1, textAlign: "left" }}>
                     참석자 찾기
@@ -3332,7 +3665,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
         if (b.id === ME_ID) return 1;
         return sortByKoreanName(a, b);
       });
-    const addedCount = selectedPeople.filter((p) => p.id !== ME_ID).length;
+    const totalAttendeeCount = selectedPeople.length;
     const toggleAttendeeInSearch = (id) => {
       if (wizard.attendees[id]) removeAttendee(id); else addAttendee(id);
     };
@@ -3341,7 +3674,10 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
         <PanelHeader title="참석자 추가" onClose={onClose} />
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <div style={{ padding: "10px 24px 0", display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
-            <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>참석자</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>참석자</div>
+              <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.blue }}>{totalAttendeeCount}</div>
+            </div>
             <div className="wizard-outline-control" style={{ height: 46, borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, boxSizing: "border-box", background: C.white }}>
               <Search size={18} color={C.ink500} />
               <input
@@ -3396,9 +3732,9 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
           <SecondaryButton compact onClick={backFromAttendees}>이전</SecondaryButton>
           <PrimaryButton compact
             onClick={() => setWizard(returnToBaseWizard(wizard, { search: "" }))}
-            style={{ opacity: addedCount === 0 ? 0.3 : 1 }}
+            style={{ opacity: totalAttendeeCount === 0 ? 0.3 : 1 }}
           >
-            {addedCount === 0 ? "추가하기" : `${addedCount}명 추가`}
+            {totalAttendeeCount === 0 ? "추가하기" : `${totalAttendeeCount}명 추가`}
           </PrimaryButton>
         </div>
       </Overlay>
@@ -3435,7 +3771,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
   if (wizard.step === "loading" || wizard.step === 3) {
     const recommendPagerBtnStyle = (disabled, side) => ({
       border: `1px solid ${C.gray300}`,
-      borderRadius: 8,
+      borderRadius: 9999,
       width: RECOMMEND_PAGER_BTN_SIZE,
       height: RECOMMEND_PAGER_BTN_SIZE,
       padding: 0,
@@ -3694,10 +4030,27 @@ function Spinner() {
   );
 }
 
-function Field({ label, children }) {
+function Field({ label, labelSuffix, action, children }) {
   return (
     <div>
-      <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900, marginBottom: 8 }}>{label}</div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          marginBottom: 8,
+          width: "100%",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+          <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{label}</div>
+          {labelSuffix != null && labelSuffix !== "" ? (
+            <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.blue }}>{labelSuffix}</div>
+          ) : null}
+        </div>
+        {action ?? null}
+      </div>
       {children}
     </div>
   );
