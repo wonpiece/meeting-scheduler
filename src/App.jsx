@@ -14,7 +14,7 @@ const APP_SHELL_STYLE = {
   height: '100vh',
   width: '100%',
   background: '#FFFFFF',
-  padding: '24px',
+  padding: '24px 24px 0',
   boxSizing: 'border-box',
   overflow: 'hidden',
   position: 'relative',

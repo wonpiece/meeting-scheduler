@@ -408,8 +408,8 @@ function getCalendarInitialScrollTop(now, companySettings) {
   const commuteOut = companySettings?.commuteOut ?? DEFAULT_COMPANY_SETTINGS.commuteOut;
   const inWorkHours = currentHour >= commuteIn && currentHour < commuteOut;
   if (inWorkHours) {
-    // 업무 시간: 출근 시각을 상단 근처에 두고, 위로 16px 여백을 남겨 이전 구간이 살짝 보이게
-    return Math.max(0, commuteIn * HOUR_HEIGHT - CALENDAR_NOW_SCROLL_TOP_OFFSET);
+    // 업무 시간: 출근 1시간 전을 상단에 두고, 위로 16px 여백
+    return Math.max(0, (commuteIn - 1) * HOUR_HEIGHT - CALENDAR_NOW_SCROLL_TOP_OFFSET);
   }
   // 업무 외: 현재 시각 기준 스크롤 유지
   return Math.max(0, getTimeOfDayTop(now) - CALENDAR_NOW_SCROLL_TOP_OFFSET);
@@ -1564,35 +1564,67 @@ export default function MeetingSchedulerApp() {
     });
   };
 
+  const weekRangeEnd = showWeekend ? addDays(weekStart, 6) : addDays(weekStart, CALENDAR_WEEKDAY_COUNT - 1);
+  const weekRangeLabel = `${weekStart.getMonth() + 1}월 ${weekStart.getDate()}일 - ${weekRangeEnd.getMonth() + 1}월 ${weekRangeEnd.getDate()}일`;
+
   return (
     <div style={{ fontFamily: FONT, color: C.ink900, background: C.white, display: "flex", flexDirection: "column", width: "100%", minWidth: 0, height: "100%", overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", gap: 44, alignItems: "center", flexShrink: 0, minHeight: 36 }}>
+        <div style={{ width: SIDEBAR_WIDTH, minWidth: SIDEBAR_WIDTH, flexShrink: 0, display: "flex", alignItems: "center", gap: 8 }}>
           <CalendarCheck2 size={20} color={C.ink900} />
           <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 21, color: C.ink900 }}>회사 캘린더</span>
         </div>
-        <OutlineSurfaceButton
-          data-tour="admin-settings"
-          aria-label="관리"
-          onClick={() => setShowAdmin(true)}
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: 8,
-            padding: 0,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-          }}
-        >
-          <Settings size={14} color={C.ink500} />
-        </OutlineSurfaceButton>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+            <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 19, color: C.ink900, whiteSpace: "nowrap" }}>{weekRangeLabel}</span>
+            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+              <CalendarWeekNavButton onClick={() => setWeekStart((w) => addDays(w, -7))} aria-label="이전 주">
+                <ChevronLeft size={20} color={C.ink600} />
+              </CalendarWeekNavButton>
+              <CalendarWeekNavButton onClick={() => setWeekStart((w) => addDays(w, 7))} aria-label="다음 주">
+                <ChevronRight size={20} color={C.ink600} />
+              </CalendarWeekNavButton>
+            </div>
+            <OutlineSurfaceButton
+              onClick={goToToday}
+              defaultBackground="transparent"
+              style={{
+                borderRadius: 8,
+                height: 36,
+                padding: "8px 12px",
+                fontFamily: FONT,
+                fontWeight: 500,
+                fontSize: 15,
+                color: C.ink900,
+                flexShrink: 0,
+              }}
+            >
+              오늘
+            </OutlineSurfaceButton>
+          </div>
+          <OutlineSurfaceButton
+            data-tour="admin-settings"
+            aria-label="관리"
+            onClick={() => setShowAdmin(true)}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 8,
+              padding: 0,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <Settings size={14} color={C.ink500} />
+          </OutlineSurfaceButton>
+        </div>
       </div>
       <div style={{ display: "flex", gap: 44, flex: 1, minHeight: 0, overflow: "hidden", paddingTop: 24 }}>
         <Sidebar people={people} visibleIds={visibleIds} toggleVisible={toggleVisible} onResetAllCalendars={resetAllCalendarEvents} onCreate={() => openWizard({ step: "quickBase", origin: "toolbar", roomRequired: true })} weekStart={weekStart} onSelectCalendarWeek={selectCalendarWeek} miniCalendarResetKey={miniCalendarResetKey} />
         <CalendarGrid
-          people={people} visibleIds={visibleIds} events={events} weekStart={weekStart} showWeekend={showWeekend} setWeekStart={setWeekStart} onGoToday={goToToday} rsvp={rsvp} companySettings={companySettings}
+          people={people} visibleIds={visibleIds} events={events} weekStart={weekStart} showWeekend={showWeekend} rsvp={rsvp} companySettings={companySettings}
           onEmptyClick={(day, hour) => openWizard({
             origin: "calendar",
             dateStr: day,
@@ -1943,8 +1975,8 @@ function Sidebar({ people, visibleIds, toggleVisible, onResetAllCalendars, onCre
           width: "100%",
           minWidth: "100%",
           maxWidth: "100%",
-          height: 52,
-          minHeight: 52,
+          height: 48,
+          minHeight: 48,
           boxSizing: "border-box",
           alignSelf: "stretch",
           display: "flex",
@@ -2028,7 +2060,34 @@ function CalendarNowIndicator({ top, variant = "day" }) {
   );
 }
 
-function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, setWeekStart, onGoToday, rsvp, companySettings, onEmptyClick, onEventClick }) {
+function CalendarWeekNavButton({ onClick, children, ...rest }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        border: "none",
+        background: hover ? C.bg2 : "none",
+        borderRadius: 6,
+        width: 28,
+        height: 28,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        padding: 0,
+      }}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
+
+function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, rsvp, companySettings, onEmptyClick, onEventClick }) {
   const hours = [];
   for (let h = 0; h <= 23; h++) hours.push(h);
   const hourText = (h) => (h < 12 ? `오전 ${h === 0 ? 12 : h}시` : `오후 ${h === 12 ? 12 : h - 12}시`);
@@ -2048,20 +2107,8 @@ function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, setW
   const todayStr = getDemoTodayStr();
   const nowTop = getTimeOfDayTop(now);
   const showNowIndicator = displayDays.includes(todayStr);
-  const rangeEndDate = showWeekend ? displayDates[6] : displayDates[CALENDAR_WEEKDAY_COUNT - 1];
-  const rangeLabel = `${weekStart.getMonth() + 1}월 ${weekStart.getDate()}일 - ${rangeEndDate.getMonth() + 1}월 ${rangeEndDate.getDate()}일`;
   const calendarGridColumns = `${CALENDAR_TIME_COL_WIDTH}px repeat(${CALENDAR_WEEKDAY_COUNT}, minmax(0, 1fr)) ${showWeekend ? "repeat(2, minmax(0, 1fr))" : "0fr 0fr"}`;
   const calendarGridTransition = `grid-template-columns ${CALENDAR_WEEKEND_EXPAND_MS}ms ${CALENDAR_WEEKEND_EXPAND_EASE}`;
-
-  const NavBtn = ({ onClick, children }) => {
-    const [hover, setHover] = useState(false);
-    return (
-      <button onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-        style={{ border: "none", background: hover ? C.bg2 : "none", borderRadius: 6, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-        {children}
-      </button>
-    );
-  };
 
   const renderDayHeader = (date, dayIndex) => {
     const isWeekendCol = dayIndex >= CALENDAR_WEEKDAY_COUNT;
@@ -2071,7 +2118,10 @@ function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, setW
         key={displayDays[dayIndex]}
         style={{
           textAlign: "center",
-          padding: "16px 0",
+          paddingTop: 0,
+          paddingRight: 0,
+          paddingBottom: 16,
+          paddingLeft: 0,
           overflow: "hidden",
           opacity: isWeekendCol && !showWeekend ? 0 : 1,
           transition: `opacity ${CALENDAR_WEEKEND_EXPAND_MS}ms ease`,
@@ -2186,30 +2236,6 @@ function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, setW
 
   return (
     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, flexShrink: 0, marginTop: -8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 19, color: C.ink900 }}>{rangeLabel}</span>
-          <div style={{ display: "flex", gap: 4 }}>
-            <NavBtn onClick={() => setWeekStart((w) => addDays(w, -7))}><ChevronLeft size={20} color={C.ink600} /></NavBtn>
-            <NavBtn onClick={() => setWeekStart((w) => addDays(w, 7))}><ChevronRight size={20} color={C.ink600} /></NavBtn>
-          </div>
-          <OutlineSurfaceButton
-            onClick={onGoToday}
-            defaultBackground="transparent"
-            style={{
-              borderRadius: 8,
-              height: 36,
-              padding: "8px 12px",
-              fontFamily: FONT,
-              fontWeight: 500,
-              fontSize: 15,
-              color: C.ink900,
-            }}
-          >
-            오늘
-          </OutlineSurfaceButton>
-        </div>
-      </div>
       <div
         style={{
           flex: 1,
@@ -2242,7 +2268,6 @@ function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, setW
             flex: 1,
             minHeight: 0,
             overflowY: "auto",
-            paddingBottom: 24,
             borderTop: `1px solid ${C.border}`,
             transition: calendarGridTransition,
           }}
