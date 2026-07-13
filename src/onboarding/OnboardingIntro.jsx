@@ -415,7 +415,13 @@ export default function OnboardingIntro({ exiting = false, onStartReveal, onExit
     }
     setNextEnabled(false);
     // Cover: enable as soon as headlines are ready so arrow keys match the button.
-    const delayMs = scene === SCENE.find || scene === SCENE.propose || scene === SCENE.cover ? 0 : 300;
+    const delayMs =
+      scene === SCENE.find
+      || scene === SCENE.propose
+      || scene === SCENE.cover
+      || scene === SCENE.act
+        ? 0
+        : 300;
     const t = window.setTimeout(() => setNextEnabled(true), delayMs);
     return () => window.clearTimeout(t);
   }, [sceneReady, scene, sceneInstant, isAutoAdvanceScene]);
@@ -635,7 +641,7 @@ export default function OnboardingIntro({ exiting = false, onStartReveal, onExit
                 <Subtitle show>인원이 늘어나면</Subtitle>
                 <div style={{ marginTop: SUBTITLE_HEADLINE_GAP, paddingBottom: HEADLINE_BOTTOM_PAD }}>
                   <Headline show={scene2.step >= 1}>
-                    확인해야 할 정보도 <span style={{ color: C.ink600 }}>복합적으로</span> 늘어나요
+                    고려해야 할 요소도 <span style={{ color: C.ink600 }}>복합적으로</span> 늘어나요
                   </Headline>
                 </div>
                 <FactorSections
@@ -676,7 +682,7 @@ export default function OnboardingIntro({ exiting = false, onStartReveal, onExit
                     와 함께 알려준다면?
                   </Headline>
                   <Headline show={scene4.step >= 4} style={{ marginTop: 64 }}>
-                    의사결정이 빨라지지 않을까요?
+                    판단이 쉬워지지 않을까요?
                   </Headline>
                 </div>
               </>
@@ -713,7 +719,7 @@ export default function OnboardingIntro({ exiting = false, onStartReveal, onExit
 
             {scene === SCENE.act && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
-                <Headline show>회의가 이뤄지도록</Headline>
+                <Headline show>회의가 성사되도록</Headline>
                 <Headline show>항상 도와드릴게요</Headline>
               </div>
             )}

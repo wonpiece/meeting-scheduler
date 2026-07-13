@@ -47,18 +47,23 @@ export const FADE_MS = 480;
 
 const MODAL_SHADOW = '0 18px 48px rgba(25, 31, 40, 0.02), 0 4px 12px rgba(25, 31, 40, 0.01)';
 const MODAL_DROP_SHADOW = 'drop-shadow(0 18px 48px rgba(25, 31, 40, 0.02)) drop-shadow(0 4px 12px rgba(25, 31, 40, 0.01))';
-const CREATE_MODAL_WIDTH = 460;
-const CREATE_MODAL_SCALE = 1.5;
-/** Match CreationWizard recommend results width, then scale up. */
-const RECOMMEND_MODAL_WIDTH = 528;
-const RECOMMEND_MODAL_SCALE = 1.55;
+/** Shared unscaled width for all onboarding right-column graphics. */
+const GRAPHIC_MODAL_WIDTH = 528;
+const CREATE_MODAL_WIDTH = GRAPHIC_MODAL_WIDTH;
+const RECOMMEND_MODAL_WIDTH = GRAPHIC_MODAL_WIDTH;
+/** Max scale at 100% zoom; further reduced by available column size. */
+const GRAPHIC_MODAL_MAX_SCALE = 1.35;
+const CREATE_MODAL_SCALE = GRAPHIC_MODAL_MAX_SCALE;
+const RECOMMEND_MODAL_SCALE = GRAPHIC_MODAL_MAX_SCALE;
 /** Keep modal shadow from being clipped by parents. */
 const MODAL_SHADOW_INSET = 32;
 /** Reserve space so floating Next (bottom: 100) doesn't collide with modals. */
-const NEXT_BUTTON_CLEARANCE = 96;
+const NEXT_BUTTON_CLEARANCE = 112;
 /** Content-sized recommend shells — avoid stretching into Next clearance gap. */
 const LOADING_MODAL_NATURAL_H = 360;
-const CONFIRM_MODAL_NATURAL_H = 600;
+const CONFIRM_MODAL_NATURAL_H = 620;
+const CONFIRM_FOOTER_H = 86;
+const MIN_FIT_SCALE = 0.55;
 const RECOMMEND_CONTENT_TOP_PAD = 32;
 const BELOW_WEEKDAY_CONTENT_MARGIN = 28;
 const SECTION_GAP = 40;
@@ -382,6 +387,16 @@ export function CreateMeetingMock({ play = false, instant = false, onTitleDone }
   const allAttendees = MOCK_MEETING.attendees;
   const shownCount = Math.max(0, visibleAttendeeCount);
 
+  // Fixed final height: header + title + attendees (6) + bottom +40.
+  const headerH = 69;
+  const titleBlockH = 78;
+  const bodyPadY = 10 + 24;
+  const attendeeSearchH = 72;
+  const attendeeGridH = 16 + Math.ceil(allAttendees.length / 2) * 52;
+  const attendeesBottomExtra = 40;
+  const detailsH = SECTION_GAP + attendeeSearchH + attendeeGridH + attendeesBottomExtra;
+  const naturalH = headerH + bodyPadY + titleBlockH + detailsH;
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return undefined;
@@ -389,15 +404,15 @@ export function CreateMeetingMock({ play = false, instant = false, onTitleDone }
       const availW = Math.max(0, el.clientWidth - MODAL_SHADOW_INSET * 2);
       const availH = Math.max(0, el.clientHeight - MODAL_SHADOW_INSET * 2 - NEXT_BUTTON_CLEARANCE);
       if (availW <= 0 || availH <= 0) return;
-      const scale = Math.min(CREATE_MODAL_SCALE, availW / CREATE_MODAL_WIDTH, availH / 420);
-      setFitScale(Math.max(0.72, scale));
+      const scale = Math.min(CREATE_MODAL_SCALE, availW / CREATE_MODAL_WIDTH, availH / naturalH);
+      setFitScale(Math.max(MIN_FIT_SCALE, scale));
       setAvail({ w: availW, h: availH });
     };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [naturalH]);
 
   useEffect(() => {
     if (instant) {
@@ -486,15 +501,6 @@ export function CreateMeetingMock({ play = false, instant = false, onTitleDone }
     };
   }, [play, instant, allAttendees]);
 
-  // Fixed final height: header + title + attendees (6) + bottom +40.
-  const headerH = 69;
-  const titleBlockH = 78;
-  const bodyPadY = 10 + 24;
-  const attendeeSearchH = 72;
-  const attendeeGridH = 16 + Math.ceil(allAttendees.length / 2) * 52;
-  const attendeesBottomExtra = 40;
-  const detailsH = SECTION_GAP + attendeeSearchH + attendeeGridH + attendeesBottomExtra;
-  const naturalH = headerH + bodyPadY + titleBlockH + detailsH;
   const maxCssH = avail.h / fitScale;
   const cssH = Math.min(maxCssH, Math.max(190, naturalH));
   const layoutW = CREATE_MODAL_WIDTH * fitScale;
@@ -709,7 +715,7 @@ export function PurposePriorityMock({ active = false, instant = false, onReady }
         availW / RECOMMEND_MODAL_WIDTH,
         availH / PURPOSE_CONTENT_H,
       );
-      setFitScale(Math.max(0.72, scale));
+      setFitScale(Math.max(MIN_FIT_SCALE, scale));
     };
     update();
     const ro = new ResizeObserver(update);
@@ -1080,7 +1086,7 @@ export function LoadingToConfirmMock({
         availW / RECOMMEND_MODAL_WIDTH,
         availH / naturalH,
       );
-      setFitScale(Math.max(0.72, scale));
+      setFitScale(Math.max(MIN_FIT_SCALE, scale));
       setAvail({ w: availW, h: availH });
     };
     update();
@@ -1140,13 +1146,15 @@ export function LoadingToConfirmMock({
   const checkpointFlash = highlightSection === 'checkpoints';
   const naturalCap = stage === 'loading' ? LOADING_MODAL_NATURAL_H : CONFIRM_MODAL_NATURAL_H;
   const maxCssH = avail.h / fitScale;
+  // Confirm fills up to available height (capped) so the footer stays pinned at the bottom.
   const layoutCssH =
     stage === 'loading'
       ? Math.min(maxCssH, LOADING_MODAL_NATURAL_H)
-      : Math.min(maxCssH, shellH > 0 ? shellH : naturalCap);
+      : Math.min(maxCssH, CONFIRM_MODAL_NATURAL_H);
   const layoutW = RECOMMEND_MODAL_WIDTH * fitScale;
   const layoutH = layoutCssH * fitScale;
   const room = candidate.room;
+  const confirmConstrained = stage === 'confirm' && layoutCssH + 1 < CONFIRM_MODAL_NATURAL_H;
 
   return (
     <div
@@ -1212,11 +1220,17 @@ export function LoadingToConfirmMock({
             alignItems: 'stretch',
           }}
         >
-          <div ref={shellRef} style={{ flex: '0 0 auto', maxHeight: maxCssH }}>
+          <div ref={shellRef} style={{ flex: '0 0 auto', maxHeight: maxCssH, width: '100%', height: stage === 'confirm' ? layoutCssH : undefined }}>
           <MockPanelShell
             width={RECOMMEND_MODAL_WIDTH}
-            height={stage === 'loading' ? LOADING_MODAL_NATURAL_H : 'auto'}
-            style={{ maxHeight: maxCssH, minHeight: 0, overflow: 'hidden', boxShadow: 'none' }}
+            height={stage === 'loading' ? LOADING_MODAL_NATURAL_H : layoutCssH}
+            style={{
+              maxHeight: maxCssH,
+              minHeight: 0,
+              height: stage === 'confirm' ? layoutCssH : undefined,
+              overflow: 'hidden',
+              boxShadow: 'none',
+            }}
           >
             {stage === 'loading' ? (
               <>
@@ -1260,13 +1274,16 @@ export function LoadingToConfirmMock({
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    flex: '0 0 auto',
+                    flex: '1 1 auto',
+                    minHeight: 0,
+                    overflow: 'hidden',
                   }}
                 >
                   <div
                     style={{
+                      flex: '1 1 auto',
                       minHeight: 0,
-                      overflowY: 'visible',
+                      overflow: confirmConstrained ? 'hidden' : 'visible',
                       opacity: contentIn ? 1 : 0,
                       transform: contentIn ? 'translateY(0)' : 'translateY(12px)',
                       transition: contentIn
@@ -1471,13 +1488,15 @@ export function LoadingToConfirmMock({
                     </div>
                   </div>
 
-                  {/* Footer */}
+                  {/* Footer — pinned to modal bottom when height is constrained */}
                   <div
                     style={{
                       display: 'flex',
                       justifyContent: 'flex-end',
                       padding: '20px 24px 24px',
                       flexShrink: 0,
+                      marginTop: 'auto',
+                      background: C.white,
                     }}
                   >
                     <div
@@ -1521,6 +1540,9 @@ const PRESS_HOVER_BG = 'rgba(17, 24, 39, 0.04)';
  */
 export function CoordinationActionMock({ play = false, instant = false, onComplete }) {
   const containerRef = useRef(null);
+  const readyNotifiedRef = useRef(false);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
   const [fitScale, setFitScale] = useState(RECOMMEND_MODAL_SCALE);
   const [avail, setAvail] = useState({ w: 720, h: 640 });
   const [phase, setPhase] = useState(instant ? 'done' : 'idle');
@@ -1535,8 +1557,12 @@ export function CoordinationActionMock({ play = false, instant = false, onComple
       const availW = Math.max(0, el.clientWidth - MODAL_SHADOW_INSET * 2);
       const availH = Math.max(0, el.clientHeight - MODAL_SHADOW_INSET - NEXT_BUTTON_CLEARANCE);
       if (availW < 200 || availH < 200) return;
-      const scale = Math.min(RECOMMEND_MODAL_SCALE, availW / RECOMMEND_MODAL_WIDTH, availH / 420);
-      setFitScale(Math.max(0.72, scale));
+      const scale = Math.min(
+        RECOMMEND_MODAL_SCALE,
+        availW / RECOMMEND_MODAL_WIDTH,
+        availH / CONFIRM_MODAL_NATURAL_H,
+      );
+      setFitScale(Math.max(MIN_FIT_SCALE, scale));
       setAvail({ w: availW, h: availH });
     };
     update();
@@ -1548,11 +1574,15 @@ export function CoordinationActionMock({ play = false, instant = false, onComple
   useEffect(() => {
     if (instant) {
       setPhase('done');
-      onComplete?.();
+      if (!readyNotifiedRef.current) {
+        readyNotifiedRef.current = true;
+        onCompleteRef.current?.();
+      }
       return undefined;
     }
     if (!play) {
       setPhase('idle');
+      readyNotifiedRef.current = false;
       return undefined;
     }
 
@@ -1564,18 +1594,26 @@ export function CoordinationActionMock({ play = false, instant = false, onComple
     // Slower beat so each step is readable: recommend → press → guide → copy → toast
     at(80, 'recommend');
     at(2000, 'press');
-    at(3200, 'guide');
+    // Enable Next when 개인 집중 시간 guide modal appears.
+    timers.push(
+      window.setTimeout(() => {
+        setPhase('guide');
+        if (!readyNotifiedRef.current) {
+          readyNotifiedRef.current = true;
+          onCompleteRef.current?.();
+        }
+      }, 3200),
+    );
     at(5400, 'copyPulse');
     at(6600, 'toast');
     timers.push(
       window.setTimeout(() => {
         setPhase('done');
-        onComplete?.();
       }, 6600 + TOAST_ENTER_MS + TOAST_HOLD_MS + TOAST_EXIT_MS + 300),
     );
 
     return () => timers.forEach((t) => window.clearTimeout(t));
-  }, [play, instant, onComplete]);
+  }, [play, instant]);
 
   const maxCssH = avail.h / fitScale;
   const cssH = Math.min(maxCssH, CONFIRM_MODAL_NATURAL_H);
@@ -1586,6 +1624,7 @@ export function CoordinationActionMock({ play = false, instant = false, onComple
   const showToast = !instant && (phase === 'toast' || phase === 'done');
   const pressing = phase === 'press';
   const pressHighlight = pressing || showGuide;
+  const constrained = cssH + 1 < CONFIRM_MODAL_NATURAL_H;
 
   return (
     <div
@@ -1650,8 +1689,8 @@ export function CoordinationActionMock({ play = false, instant = false, onComple
         >
           <MockPanelShell
             width={RECOMMEND_MODAL_WIDTH}
-            height="auto"
-            style={{ maxHeight: cssH, minHeight: 0, overflow: 'hidden', boxShadow: 'none' }}
+            height={cssH}
+            style={{ maxHeight: cssH, minHeight: 0, height: cssH, overflow: 'hidden', boxShadow: 'none' }}
           >
             {/* Header — same as propose recommend modal */}
             <div
@@ -1671,8 +1710,8 @@ export function CoordinationActionMock({ play = false, instant = false, onComple
               </span>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', flex: '0 0 auto' }}>
-              <div style={{ minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
+              <div style={{ flex: '1 1 auto', minHeight: 0, overflow: constrained ? 'hidden' : 'visible' }}>
                 <div
                   style={{
                     padding: `${RECOMMEND_CONTENT_TOP_PAD}px 24px 0`,
@@ -1801,6 +1840,8 @@ export function CoordinationActionMock({ play = false, instant = false, onComple
                   justifyContent: 'flex-end',
                   padding: '20px 24px 24px',
                   flexShrink: 0,
+                  marginTop: 'auto',
+                  background: C.white,
                 }}
               >
                 <div
