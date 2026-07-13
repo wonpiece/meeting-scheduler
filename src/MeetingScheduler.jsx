@@ -1782,7 +1782,7 @@ export default function MeetingSchedulerApp() {
       )}
 
       {detail && (
-        detail.ev.meetingMeta ? (
+        detail.ev.meetingMeta && !detail.coordinationDraft ? (
           <ConfirmedDetailModal personId={detail.personId} data={{ meta: detail.ev.meetingMeta, title: detail.ev.title, groupId: detail.ev.groupId }} people={people} onClose={() => setDetail(null)}
             overlayZIndex={wizard ? 70 : 55}
             onEdit={detail.personId === ME_ID ? () => openMeetingEditor(detail.ev.groupId, detail.ev.meetingMeta, detail.ev.title) : undefined}
@@ -4169,7 +4169,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
           </div>
         </div>
 
-        {/* 제안 영역 — dissolve + slide up */}
+        {/* 제안 영역 */}
         {headerRevealed && (
           <div
             style={{
@@ -4177,14 +4177,23 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
               minHeight: 0,
               display: "flex",
               flexDirection: "column",
-              opacity: resultsEntering ? 1 : 0,
-              transform: resultsEntering ? "translateY(0)" : "translateY(12px)",
-              transition: `opacity ${RECOMMEND_RESULTS_ENTER_MS}ms ease, transform ${RECOMMEND_RESULTS_ENTER_MS}ms ${RECOMMEND_EXIT_EASE}`,
-              pointerEvents: resultsEntering ? "auto" : "none",
             }}
           >
             {candidates.length === 0 ? (
-              <div style={{ padding: "40px 24px", textAlign: "center", color: C.ink900, fontSize: 15, flex: 1, lineHeight: 1.5 }}>
+              <div
+                style={{
+                  padding: "40px 24px",
+                  textAlign: "center",
+                  color: C.ink900,
+                  fontSize: 15,
+                  flex: 1,
+                  lineHeight: 1.5,
+                  opacity: resultsEntering ? 1 : 0,
+                  transform: resultsEntering ? "translateY(0)" : "translateY(12px)",
+                  transition: `opacity ${RECOMMEND_RESULTS_ENTER_MS}ms ease, transform ${RECOMMEND_RESULTS_ENTER_MS}ms ${RECOMMEND_EXIT_EASE}`,
+                  pointerEvents: resultsEntering ? "auto" : "none",
+                }}
+              >
                 <div style={{ fontFamily: FONT, fontWeight: 600, marginBottom: 8 }}>바로 확정 가능한 시간은 없어요.</div>
                 <div style={{ fontFamily: FONT, color: C.ink500, fontSize: 14 }}>참석자나 시간 조건을 바꾸면 만들 수 있는지 다시 찾아볼게요.</div>
               </div>
@@ -4192,7 +4201,15 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
               <>
                 <ModalScrollArea
                   watchKey={`${currentKey}-${index}-${candidates.length}-${selectedRoomId}-${recommendationLayout?.showRoomSection}-${recommendationLayout?.showReferenceSection}`}
-                  style={{ flex: 1, minHeight: 0, overflowY: "auto" }}
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    overflowY: "auto",
+                    opacity: resultsEntering ? 1 : 0,
+                    transform: resultsEntering ? "translateY(0)" : "translateY(12px)",
+                    transition: `opacity ${RECOMMEND_RESULTS_ENTER_MS}ms ease, transform ${RECOMMEND_RESULTS_ENTER_MS}ms ${RECOMMEND_EXIT_EASE}`,
+                    pointerEvents: resultsEntering ? "auto" : "none",
+                  }}
                 >
                   <div
                     style={{

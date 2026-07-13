@@ -33,7 +33,7 @@ function TourButton({ children, onClick }) {
         padding: '0 14px',
         fontFamily: FONT,
         fontWeight: 500,
-        fontSize: 15,
+        fontSize: 13,
         lineHeight: 1.4,
         cursor: 'pointer',
         flexShrink: 0,
@@ -206,7 +206,7 @@ export default function OnboardingTour({ onComplete }) {
             <div
               style={{
                 fontFamily: FONT,
-                fontSize: 17,
+                fontSize: 15,
                 fontWeight: 600,
                 lineHeight: 1.5,
                 color: C.white,
@@ -220,7 +220,7 @@ export default function OnboardingTour({ onComplete }) {
             <div
               style={{
                 fontFamily: FONT,
-                fontSize: 17,
+                fontSize: 15,
                 fontWeight: 500,
                 lineHeight: 1.5,
                 color: C.white,

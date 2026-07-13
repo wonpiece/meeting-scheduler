@@ -1,41 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ONBOARDING_STEPS } from './onboardingCopy';
-import arrowLeftIcon from '../assets/icons/icon-arrow-left-small-mono.svg?raw';
-import arrowRightIcon from '../assets/icons/icon-arrow-right-small-mono.svg?raw';
+import arrowRightAndroidIcon from '../assets/icons/icon-arrow-right-android-mono.svg?raw';
+import {
+  BG_BLUE100,
+  BG_GRAY100,
+  C,
+  CoordinationActionMock,
+  CreateMeetingMock,
+  FactorSections,
+  Fade,
+  FONT,
+  Headline,
+  LoadingToConfirmMock,
+  PAD,
+  PurposePriorityMock,
+  SUBTITLE_HEADLINE_GAP,
+  HEADLINE_BOTTOM_PAD,
+  Subtitle,
+} from './OnboardingPanels';
 
-const FONT = "'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif";
-const BG_GRAY100 = '#f2f4f6';
-const BG_BLUE100 = '#e9effb';
-const BG_TRANSITION_MS = 400;
 const SLIDE_MS = 480;
-const SUBTITLE_FONT_SIZE = 28;
-const SUBTITLE_LINE_HEIGHT = 1.4;
-const SUBTITLE_LINE_COUNT = 2;
-const SUBTITLE_SLOT_HEIGHT = SUBTITLE_FONT_SIZE * SUBTITLE_LINE_HEIGHT * SUBTITLE_LINE_COUNT;
-const INDICATOR_SUBTITLE_GAP = 100;
-const SUBTITLE_HEADLINE_GAP = 32;
-const FIRST_STEP_BLANK_MS = 320;
-const FIRST_STEP_FADE_MS = 520;
-const FIRST_STEP_STAGGER_MS = 1000;
-const FIRST_STEP_BUTTON_STAGGER_MS = 800;
-const HEADLINE_DELAY_MS_BY_STEP = {
-  1: 480,
-  2: 480,
-  3: 350,
-};
-const NAV_ICON_SIZE = 16;
-const NAV_BOTTOM_GAP = 40;
-const C = {
-  blue: '#3182f6',
-  ink900: '#323742',
-  ink500: '#8d949f',
-  white: '#ffffff',
-  bg2: '#eff1f3',
-};
+const BG_TRANSITION_MS = 500;
 
-const NAV_ICONS = {
-  left: arrowLeftIcon,
-  right: arrowRightIcon,
+const SCENE = {
+  cover: 1,
+  factors: 2,
+  multiply: 3,
+  judgment: 4,
+  whatIf: 5,
+  enterInfo: 6,
+  purpose: 7,
+  find: 8,
+  propose: 9,
+  act: 10,
+  finale: 11,
 };
 
 function normalizeSvg(svg) {
@@ -46,65 +43,63 @@ function normalizeSvg(svg) {
     .replace(/stroke="(?!none)[^"]*"/gi, 'stroke="currentColor"');
 }
 
-function NavArrowIcon({ direction, color }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        width: NAV_ICON_SIZE,
-        height: NAV_ICON_SIZE,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color,
-        lineHeight: 0,
-        transition: 'color 0.15s ease',
-      }}
-      dangerouslySetInnerHTML={{ __html: normalizeSvg(NAV_ICONS[direction]) }}
-    />
-  );
-}
-
-function getHeadlineDelay(stepIndex) {
-  return HEADLINE_DELAY_MS_BY_STEP[stepIndex] ?? 800;
-}
-
-function NavArrowButton({ direction, disabled, onClick, label }) {
+function NextButton({ enabled, onClick }) {
   const [hover, setHover] = useState(false);
-  const color = disabled ? '#c8ccd2' : hover ? C.ink900 : C.ink500;
 
   return (
     <button
       type="button"
-      aria-label={label}
-      disabled={disabled}
       onClick={(event) => {
         event.stopPropagation();
+        if (!enabled) return;
         onClick?.();
       }}
-      onMouseEnter={() => !disabled && setHover(true)}
+      disabled={!enabled}
+      onMouseEnter={() => enabled && setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
+        position: 'absolute',
+        right: 100,
+        bottom: 100,
+        zIndex: 3,
         border: 'none',
-        background: !disabled && hover ? C.bg2 : 'transparent',
-        borderRadius: 8,
-        width: 32,
-        height: 32,
-        padding: 0,
+        background: enabled ? (hover ? '#1b64da' : C.blue500) : C.gray300,
+        color: enabled ? C.white : C.ink500,
+        borderRadius: 9999,
+        padding: '26px 46px 26px 48px',
+        fontFamily: FONT,
+        fontSize: 26,
+        fontWeight: 600,
+        lineHeight: 1.2,
+        cursor: enabled ? 'pointer' : 'default',
+        boxShadow: '0 10px 28px rgba(25, 31, 40, 0.16), 0 2px 8px rgba(25, 31, 40, 0.08)',
+        transition: 'background 0.55s ease, color 0.55s ease, box-shadow 0.55s ease, transform 0.2s ease',
+        transform: enabled && hover ? 'translateY(-1px)' : 'translateY(0)',
         display: 'inline-flex',
         alignItems: 'center',
-        justifyContent: 'center',
-        cursor: disabled ? 'default' : 'pointer',
-        transition: 'background 0.15s ease, transform 0.15s ease',
-        transform: !disabled && hover ? 'scale(1.06)' : 'scale(1)',
+        gap: 4,
       }}
     >
-      <NavArrowIcon direction={direction} color={color} />
+      다음
+      <span
+        aria-hidden="true"
+        style={{
+          width: 24,
+          height: 24,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          color: 'currentColor',
+          lineHeight: 0,
+        }}
+        dangerouslySetInnerHTML={{ __html: normalizeSvg(arrowRightAndroidIcon) }}
+      />
     </button>
   );
 }
 
-function OnboardingButton({ children, onClick }) {
+function StartButton({ onClick }) {
   const [hover, setHover] = useState(false);
   return (
     <button
@@ -116,135 +111,400 @@ function OnboardingButton({ children, onClick }) {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        background: hover ? '#2b74de' : C.blue,
+        border: 'none',
+        background: hover ? '#1b64da' : C.blue500,
         color: C.white,
-        border: 'none',
-        borderRadius: 16,
-        height: 56,
-        minWidth: 160,
-        padding: '0 32px',
+        borderRadius: 9999,
+        padding: '26px 48px',
         fontFamily: FONT,
+        fontSize: 26,
         fontWeight: 600,
-        fontSize: 19,
-        lineHeight: 1.4,
+        lineHeight: 1.2,
         cursor: 'pointer',
-        transition: 'background 0.15s ease',
+        boxShadow: '0 10px 28px rgba(25, 31, 40, 0.16), 0 2px 8px rgba(25, 31, 40, 0.08)',
+        transition: 'background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease',
+        transform: hover ? 'translateY(-1px)' : 'translateY(0)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
       }}
     >
+      시작하기
+    </button>
+  );
+}
+
+function useSceneTimeline(activeKey, delaysMs, instant = false) {
+  const [step, setStep] = useState(0);
+  const [ready, setReady] = useState(false);
+  const delaysKey = delaysMs ? delaysMs.join(',') : '';
+  const totalSteps = delaysMs?.length ?? 0;
+
+  useEffect(() => {
+    if (!activeKey || !delaysMs?.length) {
+      setStep(0);
+      setReady(false);
+      return undefined;
+    }
+
+    if (instant) {
+      setStep(totalSteps);
+      setReady(true);
+      return undefined;
+    }
+
+    setStep(0);
+    setReady(false);
+    const timers = [];
+    let elapsed = 0;
+    delaysMs.forEach((delay, index) => {
+      elapsed += delay;
+      timers.push(
+        window.setTimeout(() => {
+          setStep(index + 1);
+          if (index === delaysMs.length - 1) setReady(true);
+        }, elapsed),
+      );
+    });
+    return () => timers.forEach((t) => window.clearTimeout(t));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- delaysKey captures delaysMs
+  }, [activeKey, delaysKey, instant, totalSteps]);
+
+  return { step, ready };
+}
+
+/** Mount then fade in — for sequential line reveals. */
+function AppearHeadline({ children, style }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setShow(true), 30);
+    return () => window.clearTimeout(t);
+  }, []);
+  return (
+    <Headline show={show} style={style}>
       {children}
-    </button>
+    </Headline>
   );
 }
 
-function TextBlock({ lines, fontSize, fontWeight, color, marginTop = 0, marginBottom = 0, style }) {
-  if (!lines?.length) return null;
-  return (
-    <div style={{ marginTop, marginBottom, textAlign: 'center', ...style }}>
-      {lines.map((line) => (
-        <div
-          key={line}
-          style={{
-            fontFamily: FONT,
-            fontSize,
-            fontWeight,
-            lineHeight: 1.4,
-            color,
-            whiteSpace: 'pre-wrap',
-          }}
-        >
-          {line}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function introFadeStyle(stepIndex, visibleStage, headlineRevealedForStep, element) {
-  if (stepIndex === 0) {
-    const stageMap = { indicator: 1, subtitle: 1, headline: 2, button: 3 };
-    const stage = stageMap[element];
-    return {
-      opacity: visibleStage >= stage ? 1 : 0,
-      transition: `opacity ${FIRST_STEP_FADE_MS}ms ease-out`,
-    };
-  }
-
-  if (element === 'headline') {
-    const visible = headlineRevealedForStep === stepIndex;
-    return {
-      opacity: visible ? 1 : 0,
-      transition: visible ? `opacity ${FIRST_STEP_FADE_MS}ms ease-out` : 'none',
-    };
-  }
-
-  return undefined;
-}
-
-function getStepBackground(stepIndex, headlineRevealedForStep) {
-  if (stepIndex <= 1) return BG_GRAY100;
-  if (stepIndex === 2) {
-    return headlineRevealedForStep === 2 ? BG_BLUE100 : BG_GRAY100;
-  }
-  return BG_BLUE100;
-}
-
-function SkipButton({ onClick, disabled }) {
-  const [hover, setHover] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick?.();
-      }}
-      disabled={disabled}
-      onMouseEnter={() => !disabled && setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        position: 'absolute',
-        top: 40,
-        right: 40,
-        border: 'none',
-        background: !disabled && hover ? C.bg2 : 'none',
-        borderRadius: 8,
-        padding: '4px 8px',
-        margin: 0,
-        fontFamily: FONT,
-        fontSize: 17,
-        fontWeight: 400,
-        lineHeight: 1.4,
-        color: disabled ? '#c8ccd2' : hover ? C.ink900 : C.ink500,
-        cursor: disabled ? 'default' : 'pointer',
-        transition: 'color 0.15s ease, background 0.15s ease',
-      }}
-    >
-      건너뛰기
-    </button>
-  );
-}
-
-export default function OnboardingIntro({ exiting = false, onStartReveal, onExitComplete, onSkip }) {
-  const [stepIndex, setStepIndex] = useState(0);
-  const [firstStepVisibleStage, setFirstStepVisibleStage] = useState(0);
-  const [headlineRevealedForStep, setHeadlineRevealedForStep] = useState(-1);
+export default function OnboardingIntro({ exiting = false, onStartReveal, onExitComplete }) {
+  const [scene, setScene] = useState(SCENE.cover);
+  const [doneScenes, setDoneScenes] = useState(() => new Set());
   const exitCompletedRef = useRef(false);
-  const step = ONBOARDING_STEPS[stepIndex];
-  const total = ONBOARDING_STEPS.length;
-  const isLast = stepIndex === total - 1;
+  const sceneInstant = doneScenes.has(scene);
 
-  const isFirst = stepIndex === 0;
+  const sceneCover = useSceneTimeline(
+    scene === SCENE.cover ? 'cover' : '',
+    [400, 700],
+    scene === SCENE.cover && sceneInstant,
+  );
+  const scene1 = useSceneTimeline(scene === SCENE.factors ? '1' : '', [400, 700, 800, 900], scene === SCENE.factors && sceneInstant);
+  const scene2 = useSceneTimeline(
+    scene === SCENE.multiply ? '2' : '',
+    // headline → multiply start (당겨서) → copy lines finish (5 × 260ms + buffer)
+    [700, 550, 1500],
+    scene === SCENE.multiply && sceneInstant,
+  );
+  const scene3 = useSceneTimeline(scene === SCENE.judgment ? '3' : '', [500, 900, 900], scene === SCENE.judgment && sceneInstant);
+  const scene4 = useSceneTimeline(
+    scene === SCENE.whatIf ? '4' : '',
+    // 만약 → 확정할 수 있는 시간 → 근거 → (2.7s) 의사결정 문구 → nextEnabled +0.3s
+    [350, 650, 700, 1000],
+    scene === SCENE.whatIf && sceneInstant,
+  );
+  const scene6 = useSceneTimeline(scene === SCENE.purpose ? '6' : '', [500, 1200], scene === SCENE.purpose && sceneInstant);
+  const sceneFinale = useSceneTimeline(scene === SCENE.finale ? 'finale' : '', [400, 700, 700], scene === SCENE.finale && sceneInstant);
 
-  const goPrev = useCallback(() => {
-    setStepIndex((index) => Math.max(0, index - 1));
+  const [createModalPlay, setCreateModalPlay] = useState(false);
+  const [scene5Ready, setScene5Ready] = useState(false);
+  const [enterHeadStep, setEnterHeadStep] = useState(0);
+
+  useEffect(() => {
+    if (scene !== SCENE.enterInfo) {
+      setCreateModalPlay(false);
+      setScene5Ready(false);
+      setEnterHeadStep(0);
+      return undefined;
+    }
+    if (sceneInstant) {
+      setEnterHeadStep(2);
+      setCreateModalPlay(true);
+      setScene5Ready(true);
+      return undefined;
+    }
+
+    setScene5Ready(false);
+    setCreateModalPlay(false);
+    setEnterHeadStep(0);
+
+    const timers = [];
+    const at = (ms, fn) => {
+      timers.push(window.setTimeout(fn, ms));
+    };
+
+    at(400, () => setEnterHeadStep(1));
+    at(400 + 500, () => setEnterHeadStep(2));
+    // Right graphic enters after headlines — same GRAPHIC_ENTER beat as other pages
+    at(400 + 500 + 280, () => setCreateModalPlay(true));
+
+    return () => timers.forEach((t) => window.clearTimeout(t));
+  }, [scene, sceneInstant]);
+
+  const handleCreateTitleDone = useCallback(() => {
+    setScene5Ready(true);
   }, []);
 
-  const goNext = useCallback(() => {
-    if (isLast) {
-      onStartReveal?.();
-      return;
+  const [scene6AnimDone, setScene6AnimDone] = useState(false);
+  useEffect(() => {
+    if (scene !== SCENE.purpose) {
+      setScene6AnimDone(false);
+      return undefined;
     }
-    setStepIndex((index) => index + 1);
-  }, [isLast, onStartReveal]);
+    if (sceneInstant) {
+      setScene6AnimDone(true);
+      return undefined;
+    }
+    setScene6AnimDone(false);
+    return undefined;
+  }, [scene, sceneInstant]);
+
+  const handlePurposeReady = useCallback(() => {
+    setScene6AnimDone(true);
+  }, []);
+
+  // Find: headlines + loading only
+  const [findHeadStep, setFindHeadStep] = useState(0);
+  const [findShowLoading, setFindShowLoading] = useState(false);
+  const [findLoadingDone, setFindLoadingDone] = useState(false);
+  const [scene7Ready, setScene7Ready] = useState(false);
+  const findSkipAnim = sceneInstant || findLoadingDone;
+  useEffect(() => {
+    if (scene !== SCENE.find) {
+      setFindHeadStep(0);
+      setFindShowLoading(false);
+      setScene7Ready(false);
+      return undefined;
+    }
+    if (findSkipAnim) {
+      setFindHeadStep(1);
+      setFindShowLoading(true);
+      setScene7Ready(true);
+      return undefined;
+    }
+
+    const timers = [];
+    const at = (ms, fn) => {
+      timers.push(window.setTimeout(fn, ms));
+    };
+
+    at(400, () => setFindHeadStep(1));
+    at(400 + 700, () => {
+      setFindShowLoading(true);
+      setScene7Ready(true);
+    });
+
+    return () => timers.forEach((t) => window.clearTimeout(t));
+  }, [scene, findSkipAnim]);
+
+  const handleFindLoadingComplete = useCallback(() => {
+    setFindLoadingDone(true);
+  }, []);
+
+  // Propose: headlines + recommend modal candidate cycle
+  const [proposeHeadStep, setProposeHeadStep] = useState(0);
+  // 0 idle · 1 cand0 · 2 cand1 · 3 cand0 hold
+  const [proposeModalStep, setProposeModalStep] = useState(0);
+  const [scene8Ready, setScene8Ready] = useState(false);
+  useEffect(() => {
+    if (scene !== SCENE.propose) {
+      setProposeHeadStep(0);
+      setProposeModalStep(0);
+      setScene8Ready(false);
+      return undefined;
+    }
+    if (sceneInstant) {
+      setProposeHeadStep(3);
+      setProposeModalStep(3);
+      setScene8Ready(true);
+      return undefined;
+    }
+
+    const timers = [];
+    const at = (ms, fn) => {
+      timers.push(window.setTimeout(fn, ms));
+    };
+
+    at(400, () => setProposeHeadStep(1));
+    at(400 + 700, () => setProposeHeadStep(2));
+    at(400 + 700 + 700, () => {
+      setProposeHeadStep(3);
+      setScene8Ready(true);
+    });
+
+    const modalStartMs = 400 + 700 + 700 + 500;
+    at(modalStartMs, () => setProposeModalStep(1));
+    at(modalStartMs + 3800, () => setProposeModalStep(2));
+    at(modalStartMs + 3800 + 3800, () => setProposeModalStep(3));
+
+    return () => timers.forEach((t) => window.clearTimeout(t));
+  }, [scene, sceneInstant]);
+
+  const [actPlay, setActPlay] = useState(false);
+  const [scene9Ready, setScene9Ready] = useState(false);
+  useEffect(() => {
+    if (scene !== SCENE.act) {
+      setActPlay(false);
+      setScene9Ready(false);
+      return undefined;
+    }
+    if (sceneInstant) {
+      setActPlay(true);
+      setScene9Ready(true);
+      return undefined;
+    }
+    setActPlay(false);
+    setScene9Ready(false);
+    const t = window.setTimeout(() => setActPlay(true), 480);
+    return () => window.clearTimeout(t);
+  }, [scene, sceneInstant]);
+
+  const handleActMockComplete = useCallback(() => {
+    setScene9Ready(true);
+  }, []);
+
+  const isAutoAdvanceScene = false;
+  const showFloatingNext = scene >= SCENE.cover && scene < SCENE.finale;
+
+  const sceneReady =
+    scene === SCENE.cover
+      ? sceneCover.ready
+      : scene === SCENE.factors
+        ? scene1.ready
+        : scene === SCENE.multiply
+          ? scene2.ready
+          : scene === SCENE.judgment
+            ? scene3.ready
+            : scene === SCENE.whatIf
+              ? scene4.ready
+              : scene === SCENE.enterInfo
+                ? scene5Ready
+                : scene === SCENE.purpose
+                  ? scene6AnimDone
+                  : scene === SCENE.find
+                    ? scene7Ready
+                    : scene === SCENE.propose
+                      ? scene8Ready
+                      : scene === SCENE.act
+                        ? scene9Ready
+                        : false;
+
+  const [nextEnabled, setNextEnabled] = useState(false);
+  const nextEnabledRef = useRef(false);
+  const sceneRef = useRef(scene);
+  nextEnabledRef.current = nextEnabled;
+  sceneRef.current = scene;
+
+  useEffect(() => {
+    if (!sceneReady || scene === SCENE.finale || isAutoAdvanceScene) {
+      setNextEnabled(false);
+      return undefined;
+    }
+    if (sceneInstant) {
+      setNextEnabled(true);
+      return undefined;
+    }
+    setNextEnabled(false);
+    // Cover: enable as soon as headlines are ready so arrow keys match the button.
+    const delayMs = scene === SCENE.find || scene === SCENE.propose || scene === SCENE.cover ? 0 : 300;
+    const t = window.setTimeout(() => setNextEnabled(true), delayMs);
+    return () => window.clearTimeout(t);
+  }, [sceneReady, scene, sceneInstant, isAutoAdvanceScene]);
+
+  useEffect(() => {
+    if (!isAutoAdvanceScene || !sceneReady || exiting) return undefined;
+    const delay = sceneInstant ? 800 : 500;
+    const t = window.setTimeout(() => {
+      setDoneScenes((prev) => {
+        if (prev.has(scene)) return prev;
+        const next = new Set(prev);
+        next.add(scene);
+        return next;
+      });
+      setScene((s) => Math.min(s + 1, SCENE.finale));
+    }, delay);
+    return () => window.clearTimeout(t);
+  }, [isAutoAdvanceScene, sceneReady, sceneInstant, exiting, scene]);
+
+  const goNextScene = useCallback(() => {
+    if (sceneRef.current >= SCENE.finale) return;
+    if (isAutoAdvanceScene) return;
+    if (!nextEnabledRef.current) return;
+    const currentScene = sceneRef.current;
+    setDoneScenes((prev) => {
+      if (prev.has(currentScene)) return prev;
+      const next = new Set(prev);
+      next.add(currentScene);
+      return next;
+    });
+    setScene((s) => Math.min(s + 1, SCENE.finale));
+  }, [isAutoAdvanceScene]);
+
+  const goPrevScene = useCallback(() => {
+    if (sceneRef.current <= SCENE.cover) return;
+    setScene((s) => Math.max(s - 1, SCENE.cover));
+  }, []);
+
+  useEffect(() => {
+    if (!exiting) {
+      exitCompletedRef.current = false;
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      if (exitCompletedRef.current) return;
+      exitCompletedRef.current = true;
+      onExitComplete?.();
+    }, SLIDE_MS + 50);
+    return () => window.clearTimeout(timer);
+  }, [exiting, onExitComplete]);
+
+  useEffect(() => {
+    if (exiting) return undefined;
+    const onKeyDown = (event) => {
+      if (event.repeat) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement
+        && (target.isContentEditable
+          || target.tagName === 'INPUT'
+          || target.tagName === 'TEXTAREA'
+          || target.tagName === 'SELECT')
+      ) {
+        return;
+      }
+
+      const key = event.key;
+      const isArrowRight = key === 'ArrowRight' || key === 'Right';
+      const isArrowLeft = key === 'ArrowLeft' || key === 'Left';
+      const isAdvanceKey = key === 'Enter' || key === ' ' || key === 'Spacebar';
+
+      if (isArrowLeft) {
+        event.preventDefault();
+        event.stopPropagation();
+        goPrevScene();
+        return;
+      }
+
+      // Cover: → · All scenes: Space / Enter (→ also advances when Next is available)
+      if ((isArrowRight || isAdvanceKey) && sceneRef.current !== SCENE.finale) {
+        if (!nextEnabledRef.current) return;
+        event.preventDefault();
+        event.stopPropagation();
+        goNextScene();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [exiting, goNextScene, goPrevScene]);
 
   const handleTransitionEnd = (event) => {
     if (!exiting || event.target !== event.currentTarget) return;
@@ -254,172 +514,290 @@ export default function OnboardingIntro({ exiting = false, onStartReveal, onExit
     onExitComplete?.();
   };
 
-  useEffect(() => {
-    if (!exiting) {
-      exitCompletedRef.current = false;
-      return undefined;
-    }
-
-    const timer = window.setTimeout(() => {
-      if (exitCompletedRef.current) return;
-      exitCompletedRef.current = true;
-      onExitComplete?.();
-    }, SLIDE_MS + 50);
-
-    return () => window.clearTimeout(timer);
-  }, [exiting, onExitComplete]);
-
-  useEffect(() => {
-    if (stepIndex === 0) {
-      setHeadlineRevealedForStep(-1);
-      setFirstStepVisibleStage(0);
-      const stageDelays = [
-        FIRST_STEP_BLANK_MS,
-        FIRST_STEP_BLANK_MS + FIRST_STEP_STAGGER_MS,
-        FIRST_STEP_BLANK_MS + FIRST_STEP_STAGGER_MS + FIRST_STEP_BUTTON_STAGGER_MS,
-      ];
-      const timers = [1, 2, 3].map((stage, index) =>
-        window.setTimeout(() => setFirstStepVisibleStage(stage), stageDelays[index]),
-      );
-      return () => timers.forEach((timer) => window.clearTimeout(timer));
-    }
-
-    setFirstStepVisibleStage(3);
-    const timer = window.setTimeout(
-      () => setHeadlineRevealedForStep(stepIndex),
-      getHeadlineDelay(stepIndex),
-    );
-    return () => window.clearTimeout(timer);
-  }, [stepIndex]);
-
-  useEffect(() => {
-    if (exiting) return undefined;
-    const onKeyDown = (event) => {
-      if (event.key === 'ArrowLeft') {
-        if (stepIndex === 0) return;
-        event.preventDefault();
-        goPrev();
-        return;
-      }
-      if (event.key === 'ArrowRight' || event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        goNext();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [exiting, goNext, goPrev, stepIndex]);
+  const bgBlue = (scene === SCENE.whatIf && scene4.step >= 4) || scene >= SCENE.enterInfo;
+  const isFinale = scene === SCENE.finale;
+  const showRight =
+    scene === SCENE.enterInfo
+    || scene === SCENE.purpose
+    || scene === SCENE.find
+    || scene === SCENE.propose
+    || scene === SCENE.act;
 
   return (
     <div
       onTransitionEnd={handleTransitionEnd}
-      onClick={() => {
-        if (!exiting) goNext();
-      }}
       style={{
         position: 'fixed',
         inset: 0,
         zIndex: 250,
-        background: getStepBackground(stepIndex, headlineRevealedForStep),
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        padding: '40px 24px 40px',
+        background: bgBlue ? BG_BLUE100 : BG_GRAY100,
         boxSizing: 'border-box',
+        padding: PAD,
         transform: exiting ? 'translateY(100%)' : 'translateY(0)',
         transition: [
           `transform ${SLIDE_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`,
           `background ${BG_TRANSITION_MS}ms ease`,
         ].join(', '),
         pointerEvents: exiting ? 'none' : 'auto',
-        overflowY: 'auto',
-        cursor: 'pointer',
+        overflow: 'hidden',
+        cursor: 'default',
       }}
     >
-      <SkipButton onClick={onSkip} disabled={exiting} />
+      {!isFinale && showFloatingNext && (
+        <NextButton enabled={nextEnabled} onClick={goNextScene} />
+      )}
 
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 720,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-        }}
-      >
+      {isFinale ? (
         <div
           style={{
-            fontFamily: FONT,
-            fontSize: 20,
-            fontWeight: 500,
-            lineHeight: 1.4,
-            color: C.ink500,
-            ...introFadeStyle(stepIndex, firstStepVisibleStage, headlineRevealedForStep, 'indicator'),
-          }}
-        >
-          {stepIndex + 1} / {total}
-        </div>
-
-        <div
-          style={{
-            marginTop: INDICATOR_SUBTITLE_GAP,
-            minHeight: SUBTITLE_SLOT_HEIGHT,
-            width: '100%',
+            position: 'absolute',
+            inset: 0,
             display: 'flex',
             flexDirection: 'column',
-            justifyContent: 'flex-start',
             alignItems: 'center',
-            ...introFadeStyle(stepIndex, firstStepVisibleStage, headlineRevealedForStep, 'subtitle'),
+            justifyContent: 'center',
+            gap: 16,
+            padding: PAD,
+            boxSizing: 'border-box',
+            textAlign: 'center',
+            pointerEvents: 'none',
+            transform: 'translateY(-40px)',
           }}
         >
-          <TextBlock
-            lines={step.subtitle}
-            fontSize={SUBTITLE_FONT_SIZE}
-            fontWeight={600}
-            color={C.ink900}
-          />
+          <Fade show={sceneFinale.step >= 1}>
+            <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 46, lineHeight: 1.35, color: C.ink1000 }}>
+              고민 없는 확정 과정
+            </div>
+          </Fade>
+          <Fade show={sceneFinale.step >= 2}>
+            <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 46, lineHeight: 1.35, color: C.ink1000 }}>
+              직접 경험해 보실래요?
+            </div>
+          </Fade>
+          <div style={{ marginTop: 32, pointerEvents: 'auto' }}>
+            <Fade show={sceneFinale.step >= 3}>
+              <StartButton onClick={onStartReveal} />
+            </Fade>
+          </div>
         </div>
+      ) : (
+        <div
+          style={{
+            height: '100%',
+            minHeight: 0,
+            display: 'flex',
+            gap: 32,
+            alignItems: 'stretch',
+            boxSizing: 'border-box',
+          }}
+        >
+          <div
+            style={{
+              flex: showRight ? '0 1 52%' : '1 1 auto',
+              minWidth: 0,
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'stretch',
+              justifyContent: 'flex-start',
+            }}
+          >
+            {scene === SCENE.cover && (
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, width: '100%' }}>
+                <Subtitle show={sceneCover.step >= 1}>2026</Subtitle>
+                <div style={{ marginTop: SUBTITLE_HEADLINE_GAP, paddingBottom: HEADLINE_BOTTOM_PAD }}>
+                  <Headline show={sceneCover.step >= 2}>Product Designer Challenge</Headline>
+                </div>
+              </div>
+            )}
 
-        <TextBlock
-          lines={step.headline}
-          fontSize={40}
-          fontWeight={600}
-          color={C.ink900}
-          marginTop={SUBTITLE_HEADLINE_GAP}
-          marginBottom={48}
-          style={introFadeStyle(stepIndex, firstStepVisibleStage, headlineRevealedForStep, 'headline')}
-        />
+            {scene === SCENE.factors && (
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, width: '100%' }}>
+                <Subtitle show={scene1.step >= 1}>회의 주선자는 회의 일정을 잡을 시</Subtitle>
+                <div style={{ marginTop: SUBTITLE_HEADLINE_GAP, paddingBottom: HEADLINE_BOTTOM_PAD }}>
+                  <Headline show={scene1.step >= 2}>
+                    <span style={{ color: C.blue500 }}>필수 요소</span>
+                    와{'  '}
+                    <span style={{ color: C.blue500 }}>정성 요소</span>
+                    를 고려해서 일정을 잡아요
+                  </Headline>
+                </div>
+                <FactorSections
+                  showRequired={scene1.step >= 3}
+                  showSoft={scene1.step >= 4}
+                  multiplyCount={1}
+                />
+              </div>
+            )}
 
-        <div style={introFadeStyle(stepIndex, firstStepVisibleStage, headlineRevealedForStep, 'button')}>
-          <OnboardingButton onClick={goNext}>{step.cta}</OnboardingButton>
+            {scene === SCENE.multiply && (
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, width: '100%' }}>
+                <Subtitle show>인원이 늘어나면</Subtitle>
+                <div style={{ marginTop: SUBTITLE_HEADLINE_GAP, paddingBottom: HEADLINE_BOTTOM_PAD }}>
+                  <Headline show={scene2.step >= 1}>
+                    확인해야 할 정보도 <span style={{ color: C.ink600 }}>복합적으로</span> 늘어나요
+                  </Headline>
+                </div>
+                <FactorSections
+                  showRequired
+                  showSoft
+                  multiplyCount={scene2.step >= 2 || sceneInstant ? 6 : 1}
+                />
+              </div>
+            )}
+
+            {scene === SCENE.judgment && (
+              <>
+                <Subtitle show={scene3.step >= 1}>결국</Subtitle>
+                <div style={{ marginTop: SUBTITLE_HEADLINE_GAP, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {scene3.step >= 2 && (
+                    <AppearHeadline>회의를 주선할 때 마다</AppearHeadline>
+                  )}
+                  {scene3.step >= 3 && (
+                    <AppearHeadline>
+                      <span style={{ color: C.ink600 }}>이 시간으로 정해도 되는지</span> 판단해야 해요
+                    </AppearHeadline>
+                  )}
+                </div>
+              </>
+            )}
+
+            {scene === SCENE.whatIf && (
+              <>
+                <Subtitle show={scene4.step >= 1}>만약</Subtitle>
+                <div style={{ marginTop: SUBTITLE_HEADLINE_GAP, display: 'flex', flexDirection: 'column' }}>
+                  <Headline show={scene4.step >= 2}>
+                    이 시간이{' '}
+                    <span style={{ color: C.blue500 }}>확정할 수 있는 시간</span>
+                    임을
+                  </Headline>
+                  <Headline show={scene4.step >= 3} style={{ marginTop: 4 }}>
+                    <span style={{ color: C.blue500 }}>근거</span>
+                    와 함께 알려준다면?
+                  </Headline>
+                  <Headline show={scene4.step >= 4} style={{ marginTop: 64 }}>
+                    의사결정이 빨라지지 않을까요?
+                  </Headline>
+                </div>
+              </>
+            )}
+
+            {scene === SCENE.enterInfo && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                <Headline show={enterHeadStep >= 1}>회의를 잡을 때</Headline>
+                <Headline show={enterHeadStep >= 2}>입력한 정보에 따라</Headline>
+              </div>
+            )}
+
+            {scene === SCENE.purpose && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                <Headline show={scene6.step >= 1}>목적에 맞춰서</Headline>
+                <Headline show={scene6.step >= 1}>우선순위를 검토하고</Headline>
+              </div>
+            )}
+
+            {scene === SCENE.find && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                <Headline show={findHeadStep >= 1}>일정을 확정하는</Headline>
+                <Headline show={findHeadStep >= 1}>과정과 근거를 통해</Headline>
+              </div>
+            )}
+
+            {scene === SCENE.propose && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                <Headline show={proposeHeadStep >= 1}>동료들의 상황을</Headline>
+                <Headline show={proposeHeadStep >= 2}>더 쉽게 판단하고</Headline>
+                <Headline show={proposeHeadStep >= 3}>회의를 잡을 수 있어요</Headline>
+              </div>
+            )}
+
+            {scene === SCENE.act && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                <Headline show>회의가 이뤄지도록</Headline>
+                <Headline show>항상 도와드릴게요</Headline>
+              </div>
+            )}
+          </div>
+
+          {showRight && (
+            <div
+              style={{
+                flex: '1 1 48%',
+                minWidth: 0,
+                minHeight: 0,
+                height: '100%',
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'flex-start',
+                overflow: 'visible',
+                transform: 'translateX(-40px)',
+              }}
+            >
+              <div
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  minHeight: 0,
+                  maxHeight: '100%',
+                  display: 'flex',
+                  justifyContent: 'flex-start',
+                  alignItems: 'flex-start',
+                  overflow: 'visible',
+                }}
+              >
+                {scene === SCENE.enterInfo && createModalPlay && (
+                  <CreateMeetingMock
+                    key={sceneInstant ? 'create-done' : 'create-play'}
+                    play
+                    instant={sceneInstant}
+                    onTitleDone={handleCreateTitleDone}
+                  />
+                )}
+                {scene === SCENE.purpose && (scene6.step >= 1 || sceneInstant) && (
+                  <PurposePriorityMock
+                    active={scene6.step >= 2 || scene6.ready || sceneInstant}
+                    instant={sceneInstant}
+                    onReady={handlePurposeReady}
+                  />
+                )}
+                {scene === SCENE.find && findShowLoading && (
+                  <LoadingToConfirmMock
+                    key="loading"
+                    stage="loading"
+                    instant={findSkipAnim}
+                    onLoadingComplete={handleFindLoadingComplete}
+                    highlightSection={null}
+                  />
+                )}
+                {scene === SCENE.propose && proposeModalStep >= 1 && (
+                  <LoadingToConfirmMock
+                    key="confirm"
+                    stage="confirm"
+                    instant={sceneInstant}
+                    candidateIndex={
+                      sceneInstant
+                        ? 0
+                        : proposeModalStep >= 3
+                          ? 0
+                          : proposeModalStep >= 2
+                            ? 1
+                            : 0
+                    }
+                    highlightSection={null}
+                  />
+                )}
+                {scene === SCENE.act && (
+                  <CoordinationActionMock
+                    play={actPlay}
+                    instant={sceneInstant}
+                    onComplete={handleActMockComplete}
+                  />
+                )}
+              </div>
+            </div>
+          )}
         </div>
-      </div>
-
-      <div
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: NAV_BOTTOM_GAP,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-        }}
-      >
-        <NavArrowButton
-          direction="left"
-          label="이전"
-          disabled={isFirst}
-          onClick={goPrev}
-        />
-        <NavArrowButton
-          direction="right"
-          label={isLast ? '시작하기' : '다음'}
-          disabled={false}
-          onClick={goNext}
-        />
-      </div>
+      )}
     </div>
   );
 }

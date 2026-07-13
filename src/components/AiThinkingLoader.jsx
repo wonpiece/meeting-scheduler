@@ -104,6 +104,8 @@ export function AiThinkingStepList({
   occasion = "default",
   Check,
   Spinner,
+  /** When true, pending rows keep layout space (no height growth as steps appear). */
+  reservePendingSpace = false,
 }) {
   const steps = getAiThinkingSteps({ soloOnly, roomRequired, avoidSoftTimes, occasion });
 
@@ -113,15 +115,24 @@ export function AiThinkingStepList({
         let state = "pending";
         if (index < loadingStepIndex) state = "done";
         else if (index === loadingStepIndex) state = loadingStepPhase === "working" ? "active" : "done";
-        if (state === "pending") return null;
+        if (state === "pending" && !reservePendingSpace) return null;
         return (
-          <AiThinkingStepRow
+          <div
             key={`${step.loading}-${index}`}
-            step={step}
-            state={state}
-            Check={Check}
-            Spinner={Spinner}
-          />
+            style={
+              state === "pending"
+                ? { visibility: "hidden", pointerEvents: "none" }
+                : undefined
+            }
+            aria-hidden={state === "pending" ? true : undefined}
+          >
+            <AiThinkingStepRow
+              step={step}
+              state={state === "pending" ? "done" : state}
+              Check={Check}
+              Spinner={Spinner}
+            />
+          </div>
         );
       })}
     </div>

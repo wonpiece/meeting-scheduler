@@ -3,7 +3,6 @@ import MeetingScheduler from './MeetingScheduler';
 import OnboardingIntro from './onboarding/OnboardingIntro';
 import OnboardingTour from './onboarding/OnboardingTour';
 import {
-  isOnboardingComplete,
   markOnboardingComplete,
   readOnboardingEntryState,
   TOUR_REVEAL_DELAY_MS,
@@ -63,7 +62,6 @@ function App() {
           exiting={introExiting}
           onStartReveal={handleStartReveal}
           onExitComplete={handleExitComplete}
-          onSkip={finishOnboarding}
         />
       )}
       {showTour && <OnboardingTour onComplete={finishOnboarding} />}

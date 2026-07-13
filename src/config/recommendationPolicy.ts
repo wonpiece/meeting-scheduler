@@ -969,7 +969,7 @@ function compareCandidatesForDisplay(a: SlotCandidate, b: SlotCandidate) {
   return a.start.getTime() - b.start.getTime();
 }
 
-/** 캐러셀 표시: tier 우선 → 조율 비용 낮을수록 → 가까운 시간 */
+/** 캐러셀 표시: 확정 용이성(조율·확인할 점) 우선 → 점수 → 이른 시간 */
 function compareCandidatesForCarousel(a: SlotCandidate, b: SlotCandidate) {
   const tierDiff = a.tier - b.tier;
   if (tierDiff !== 0) return tierDiff;
@@ -977,9 +977,17 @@ function compareCandidatesForCarousel(a: SlotCandidate, b: SlotCandidate) {
   const coordinationDiff = getCandidateCoordinationCost(a) - getCandidateCoordinationCost(b);
   if (coordinationDiff !== 0) return coordinationDiff;
 
-  const timeDiff = a.start.getTime() - b.start.getTime();
-  if (timeDiff !== 0) return timeDiff;
-  return compareCandidatesForDisplay(a, b);
+  // 참고할 점·조율 항목 등 확인할 점이 많을수록 뒤로
+  const checkpointDiff = a.checkpoints.length - b.checkpoints.length;
+  if (checkpointDiff !== 0) return checkpointDiff;
+
+  const softDiff = a.metrics.softPenalty - b.metrics.softPenalty;
+  if (softDiff !== 0) return softDiff;
+
+  const scoreDiff = b.metrics.compositeScore - a.metrics.compositeScore;
+  if (Math.abs(scoreDiff) > 1e-9) return scoreDiff;
+
+  return a.start.getTime() - b.start.getTime();
 }
 
 const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"] as const;
@@ -1040,11 +1048,9 @@ export function buildPositiveValidationReasons(input: {
     optionalCount,
     allCount,
     bufferOkCount,
-    softTimeFlags,
     hasBackToBack,
   } = input;
 
-  const avoidSoftTimes = input.avoidSoftTimes !== false;
   const avoidBusyDays = input.avoidBusyDays !== false;
 
   const allAvailable =
@@ -1088,8 +1094,8 @@ export function buildPositiveValidationReasons(input: {
     pushUniqueReason(
       reasons,
       allCount === 1
-        ? "회의 전후 30분 일정이 비어 있어요."
-        : `${allCount}명 중 ${bufferOkCount}명, 회의 전후 30분 일정이 비어 있어요.`,
+        ? "회의 전후로 30분씩 여유가 있어요."
+        : `${allCount}명 중 ${bufferOkCount}명이 회의 전후로 30분씩 여유가 있어요.`,
     );
   }
 
@@ -1099,23 +1105,9 @@ export function buildPositiveValidationReasons(input: {
     pushUniqueReason(reasons, "퇴근 시간에 맞춰 잡았어요.");
   }
 
-  if (input.occasion === "default") {
-    const comfortParts: string[] = [];
-    const softTimesClear =
-      !softTimeFlags.beforeLeaving &&
-      !softTimeFlags.afterLunch &&
-      !softTimeFlags.justArrived;
-    // 비선호 시간 배려 ON + 해당 구간 회피 시에만
-    if (avoidSoftTimes && softTimesClear) {
-      comfortParts.push("출근 직후", "퇴근 직전", "점심 직후");
-    }
-    // 일정 많은 날 배려 ON + 연속 회의 없을 때만
-    if (avoidBusyDays && !hasBackToBack) {
-      comfortParts.push("바로 앞뒤 회의");
-    }
-    if (comfortParts.length > 0) {
-      pushUniqueReason(reasons, `${comfortParts.join(" · ")} 시간대가 아니에요.`);
-    }
+  // 출근/퇴근/점심은 시간만 봐도 알 수 있어 문구에서 제외. 앞뒤 회의 여유만 노출.
+  if (input.occasion === "default" && avoidBusyDays && !hasBackToBack) {
+    pushUniqueReason(reasons, "앞뒤로 회의가 없어, 부담이 적은 시간이에요.");
   }
 
   if (input.requiredRoom && input.roomReason) {
@@ -1894,5 +1886,5 @@ export function buildCoordinationDraftMessage(input: {
   const blockingRange = formatShortScheduleRange(input.blockingStart, input.blockingEnd);
   const proposedRange = formatShortScheduleRange(input.proposedStart, input.proposedEnd);
   const proposedTitle = input.proposedTitle.trim() || "새 일정";
-  return `${owner}님, 안녕하세요! ${proposedTitle}(${proposedRange}) 미팅을 잡으려는데 ${input.blockingTitle}(${blockingRange}) 일정과 겹쳐요. ${input.blockingTitle} 일정을 다른 시간으로 옮길 수 있는지 확인 부탁드려요!`;
+  return `${owner}님, 안녕하세요! ${proposedTitle}(${proposedRange}) 미팅을 잡으려는데 ${input.blockingTitle}(${blockingRange}) 일정과 겹쳐요. 혹시 ${input.blockingTitle} 일정을 다른 시간으로 옮기는게 가능할까요?`;
 }
