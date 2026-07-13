@@ -1,9 +1,54 @@
 @import 'pretendard/dist/web/static/pretendard.css';
+
+/* local('Pretendard …')가 시스템에 다른 굵기로 깔린 폰트를 쓰면 SemiBold가 Black처럼 보일 수 있어 웹폰트만 다시 등록 */
+@font-face {
+  font-family: 'Pretendard';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('pretendard/dist/web/static/woff2/Pretendard-Regular.woff2') format('woff2'),
+    url('pretendard/dist/web/static/woff/Pretendard-Regular.woff') format('woff');
+}
+@font-face {
+  font-family: 'Pretendard';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('pretendard/dist/web/static/woff2/Pretendard-Medium.woff2') format('woff2'),
+    url('pretendard/dist/web/static/woff/Pretendard-Medium.woff') format('woff');
+}
+@font-face {
+  font-family: 'Pretendard';
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url('pretendard/dist/web/static/woff2/Pretendard-SemiBold.woff2') format('woff2'),
+    url('pretendard/dist/web/static/woff/Pretendard-SemiBold.woff') format('woff');
+}
+@font-face {
+  font-family: 'Pretendard';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('pretendard/dist/web/static/woff2/Pretendard-Bold.woff2') format('woff2'),
+    url('pretendard/dist/web/static/woff/Pretendard-Bold.woff') format('woff');
+}
+
 :root { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif; color: #323742; background: #ffffff; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; width: 100%; min-width: 0; min-height: 100%; }
 body { min-height: 100vh; background: #ffffff; }
 button, input, select { font: inherit; }
+button.wizard-duration-custom-link {
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
+  color: #6b7280 !important;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+}
 .wizard-datetime-input[type="date"]::-webkit-calendar-picker-indicator { display: none; -webkit-appearance: none; }
 .wizard-datetime-input[type="time"]::-webkit-calendar-picker-indicator {
   position: absolute;
