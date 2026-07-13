@@ -4,16 +4,16 @@ export const AI_THINKING_STEPS = [
   { loading: "회의 목적 파악하는 중", done: "회의 목적 파악 완료" },
   { loading: "참석자 확인하는 중", done: "참석자 확인 완료" },
   { loading: "외근 및 빈 시간 확인하는 중", done: "외근 및 빈 시간 확인 완료" },
-  { loading: "예약 가능 회의실 찾는 중", done: "예약 가능 회의실 확보 완료" },
-  { loading: "식사 · 출퇴근 시간 배려 중", done: "식사 · 출퇴근 시간 배려 완료" },
+  { id: "room", loading: "예약 가능 회의실 찾는 중", done: "예약 가능 회의실 확보 완료" },
+  { id: "softTimes", loading: "식사 · 출퇴근 시간 배려 중", done: "식사 · 출퇴근 시간 배려 완료" },
 ];
 
 const AI_THINKING_STEPS_SOLO = [
   { loading: "일정 목적 파악하는 중", done: "일정 목적 파악 완료" },
   { loading: "내 일정 확인하는 중", done: "내 일정 확인 완료" },
   { loading: "빈 시간 찾는 중", done: "빈 시간 확인 완료" },
-  { loading: "예약 가능 회의실 찾는 중", done: "예약 가능 회의실 확보 완료" },
-  { loading: "식사 · 출퇴근 시간 배려하는 중", done: "식사 · 출퇴근 시간 배려 완료" },
+  { id: "room", loading: "예약 가능 회의실 찾는 중", done: "예약 가능 회의실 확보 완료" },
+  { id: "softTimes", loading: "식사 · 출퇴근 시간 배려하는 중", done: "식사 · 출퇴근 시간 배려 완료" },
 ];
 
 const AI_THINKING_STEPS_SOLO_NO_ROOM = [
@@ -21,12 +21,33 @@ const AI_THINKING_STEPS_SOLO_NO_ROOM = [
   { loading: "내 일정 확인하는 중", done: "내 일정 확인 완료" },
   { loading: "빈 시간 찾는 중", done: "빈 시간 확인 완료" },
   { loading: "겹치는 일정 확인하는 중", done: "겹치는 일정 확인 완료" },
-  { loading: "식사 · 출퇴근 시간 배려하는 중", done: "식사 · 출퇴근 시간 배려 완료" },
+  { id: "softTimes", loading: "식사 · 출퇴근 시간 배려하는 중", done: "식사 · 출퇴근 시간 배려 완료" },
 ];
 
-export function getAiThinkingSteps({ soloOnly = false, roomRequired = true } = {}) {
-  if (!soloOnly) return AI_THINKING_STEPS;
-  return roomRequired ? AI_THINKING_STEPS_SOLO : AI_THINKING_STEPS_SOLO_NO_ROOM;
+export function getAiThinkingSteps({
+  soloOnly = false,
+  roomRequired = true,
+  avoidSoftTimes = true,
+  occasion = "default",
+} = {}) {
+  let steps = !soloOnly
+    ? AI_THINKING_STEPS
+    : roomRequired
+      ? AI_THINKING_STEPS_SOLO
+      : AI_THINKING_STEPS_SOLO_NO_ROOM;
+
+  if (!roomRequired) {
+    steps = steps.filter((step) => step.id !== "room");
+  }
+
+  const skipSoftTimes = avoidSoftTimes === false
+    || occasion === "lunch"
+    || occasion === "dinner";
+  if (skipSoftTimes) {
+    steps = steps.filter((step) => step.id !== "softTimes");
+  }
+
+  return steps;
 }
 
 export function getAiLoadingStepCount(options) {
@@ -74,8 +95,17 @@ function AiThinkingStepRow({ step, state, Check, Spinner }) {
   );
 }
 
-export function AiThinkingStepList({ loadingStepIndex, loadingStepPhase, soloOnly = false, roomRequired = true, Check, Spinner }) {
-  const steps = getAiThinkingSteps({ soloOnly, roomRequired });
+export function AiThinkingStepList({
+  loadingStepIndex,
+  loadingStepPhase,
+  soloOnly = false,
+  roomRequired = true,
+  avoidSoftTimes = true,
+  occasion = "default",
+  Check,
+  Spinner,
+}) {
+  const steps = getAiThinkingSteps({ soloOnly, roomRequired, avoidSoftTimes, occasion });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>

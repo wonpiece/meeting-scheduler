@@ -1,5 +1,5 @@
 export const ONBOARDING_STORAGE_KEY = 'meeting-scheduler:onboarding-v1';
-export const TOUR_REVEAL_DELAY_MS = 1000;
+export const TOUR_REVEAL_DELAY_MS = 300;
 
 export const ONBOARDING_STEPS = [
   {
@@ -28,7 +28,7 @@ export const TOUR_STEPS = [
     target: 'create-schedule',
     placement: 'right',
     title: '회의 일정을 추가해 보세요',
-    textLines: ['참여자, 회의실, 여유 시간을 고려해 최적 일정을 찾아드릴게요.'],
+    textLines: ['참여자, 회의실, 여유 시간을 고려해 확정 가능한 시간을 찾아드릴게요.'],
     cta: '확인',
     dismissOnBackdrop: true,
   },

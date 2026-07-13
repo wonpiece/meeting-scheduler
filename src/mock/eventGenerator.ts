@@ -23,8 +23,9 @@ export const MOCK_WEEK_COUNT = 3;
 
 const MIN_EVENT_DURATION_MIN = 30;
 const TIME_SNAP_MIN = 10;
-/** 구성원별 주간 일정 목표량 — 약 15% 감소 */
-const VOLUME_SCALE = 0.85;
+/** 구성원별 주간 일정 목표량 — 직전 대비 약 70% */
+const VOLUME_SCALE = 0.595;
+const FRAGMENTED_ONE_ON_ONE_SCALE = 0.7;
 
 type GeneratorBounds = {
   lunchStart: number;
@@ -445,7 +446,7 @@ export function buildWeekSchedule(person: MockPerson, week: number, traits?: Per
   if (!template) return [];
 
   const personTraits = traits ?? derivePersonTraits(person);
-  const random = seededRandom(hashString(`${person.id}|${person.name}|${week}|v3`));
+  const random = seededRandom(hashString(`${person.id}|${person.name}|${week}|v4`));
   const weekMod = WEEK_COUNT_MODIFIERS[week] ?? WEEK_COUNT_MODIFIERS[0];
   const schedule: DraftScheduleItem[] = [];
 
@@ -480,7 +481,9 @@ export function buildWeekSchedule(person: MockPerson, week: number, traits?: Per
 
   if (template.fragmentedOneOnOnePerDay) {
     const [lo, hi] = template.fragmentedOneOnOnePerDay;
-    injectFragmentedOneOnOnes(schedule, person, week, random, personTraits, [lo, hi]);
+    const scaledLo = Math.max(0, Math.round(lo * FRAGMENTED_ONE_ON_ONE_SCALE));
+    const scaledHi = Math.max(scaledLo, Math.round(hi * FRAGMENTED_ONE_ON_ONE_SCALE));
+    injectFragmentedOneOnOnes(schedule, person, week, random, personTraits, [scaledLo, scaledHi]);
   }
 
   const focusChance = Math.min(
