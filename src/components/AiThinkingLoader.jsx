@@ -8,12 +8,37 @@ export const AI_THINKING_STEPS = [
   { loading: "식사 · 출퇴근 시간 배려 중", done: "식사 · 출퇴근 시간 배려 완료" },
 ];
 
+const AI_THINKING_STEPS_SOLO = [
+  { loading: "일정 목적 파악하는 중", done: "일정 목적 파악 완료" },
+  { loading: "내 일정 확인하는 중", done: "내 일정 확인 완료" },
+  { loading: "빈 시간 찾는 중", done: "빈 시간 확인 완료" },
+  { loading: "예약 가능 회의실 찾는 중", done: "예약 가능 회의실 확보 완료" },
+  { loading: "식사 · 출퇴근 시간 배려하는 중", done: "식사 · 출퇴근 시간 배려 완료" },
+];
+
+const AI_THINKING_STEPS_SOLO_NO_ROOM = [
+  { loading: "일정 목적 파악하는 중", done: "일정 목적 파악 완료" },
+  { loading: "내 일정 확인하는 중", done: "내 일정 확인 완료" },
+  { loading: "빈 시간 찾는 중", done: "빈 시간 확인 완료" },
+  { loading: "겹치는 일정 확인하는 중", done: "겹치는 일정 확인 완료" },
+  { loading: "식사 · 출퇴근 시간 배려하는 중", done: "식사 · 출퇴근 시간 배려 완료" },
+];
+
+export function getAiThinkingSteps({ soloOnly = false, roomRequired = true } = {}) {
+  if (!soloOnly) return AI_THINKING_STEPS;
+  return roomRequired ? AI_THINKING_STEPS_SOLO : AI_THINKING_STEPS_SOLO_NO_ROOM;
+}
+
+export function getAiLoadingStepCount(options) {
+  return getAiThinkingSteps(options).length;
+}
+
 export const AI_LOADING_STEP_COUNT = AI_THINKING_STEPS.length;
 /** Active item shimmer / spinner duration before marking complete */
-export const AI_STEP_ACTIVE_MS = 1600;
+export const AI_STEP_ACTIVE_MS = 1280;
 /** Pause on completed row before revealing the next one */
-export const AI_STEP_DONE_HOLD_MS = 550;
-export const AI_RESULTS_DELAY_MS = 620;
+export const AI_STEP_DONE_HOLD_MS = 420;
+export const AI_RESULTS_DELAY_MS = 480;
 
 function AiThinkingStepRow({ step, state, Check, Spinner }) {
   const isDone = state === "done";
@@ -41,11 +66,7 @@ function AiThinkingStepRow({ step, state, Check, Spinner }) {
       </span>
       <span
         className={isActive ? "ai-shimmer-loading-step" : undefined}
-        style={{
-          transition: "opacity 0.22s ease",
-          opacity: isDone ? 0.72 : 1,
-          ...(isActive ? { "--ai-shimmer-duration": `${AI_STEP_ACTIVE_MS}ms` } : {}),
-        }}
+        style={isActive ? { "--ai-shimmer-duration": `${AI_STEP_ACTIVE_MS}ms` } : undefined}
       >
         {isDone ? step.done : step.loading}
       </span>
@@ -53,17 +74,19 @@ function AiThinkingStepRow({ step, state, Check, Spinner }) {
   );
 }
 
-export function AiThinkingStepList({ loadingStepIndex, loadingStepPhase, Check, Spinner }) {
+export function AiThinkingStepList({ loadingStepIndex, loadingStepPhase, soloOnly = false, roomRequired = true, Check, Spinner }) {
+  const steps = getAiThinkingSteps({ soloOnly, roomRequired });
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {AI_THINKING_STEPS.map((step, index) => {
+      {steps.map((step, index) => {
         let state = "pending";
         if (index < loadingStepIndex) state = "done";
         else if (index === loadingStepIndex) state = loadingStepPhase === "working" ? "active" : "done";
         if (state === "pending") return null;
         return (
           <AiThinkingStepRow
-            key={step.loading}
+            key={`${step.loading}-${index}`}
             step={step}
             state={state}
             Check={Check}

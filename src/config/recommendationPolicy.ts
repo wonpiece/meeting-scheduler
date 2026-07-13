@@ -841,12 +841,23 @@ export function buildCheckpoints(input: {
     );
   });
   if (hasBackToBack && backToBackIds.length > 0) {
-    const names = personNames(backToBackIds, people).sort((a, b) => a.localeCompare(b, "ko"));
-    checkpoints.push({
-      type: "back_to_back_meeting",
-      title: `${formatNames(names)} 바로 다음 회의 있음`,
-      description: "시간 안에 끝날 수 있도록 회의록을 미리 공유해 보세요.",
-    });
+    if (backToBackIds.includes(organizerId)) {
+      checkpoints.push({
+        type: "back_to_back_meeting",
+        targetPersonId: organizerId,
+        title: "바로 다음 회의 있음",
+        description: "참여해야 하는 안건을 먼저 논의하고, 다음 회의에 늦지 않도록 시간을 맞춰 보세요.",
+      });
+    }
+    const otherBackToBackIds = backToBackIds.filter((id) => id !== organizerId);
+    if (otherBackToBackIds.length > 0) {
+      const names = personNames(otherBackToBackIds, people).sort((a, b) => a.localeCompare(b, "ko"));
+      checkpoints.push({
+        type: "back_to_back_meeting",
+        title: `${formatNames(names)} 바로 다음 회의 있음`,
+        description: `${formatNames(names)}이 참여해야 하는 안건을 먼저 논의하고, 먼저 퇴실할 수 있도록 도와주세요.`,
+      });
+    }
   }
 
   const fatiguedIds = skipBufferAndSoftChecks ? [] : allIds.filter((id) => {
@@ -870,6 +881,18 @@ export function buildCheckpoints(input: {
 
 function pushUniqueReason(reasons: string[], line: string) {
   if (!reasons.includes(line)) reasons.push(line);
+}
+
+function getRoomCountComparativeLeader(pool: SlotCandidate[]): SlotCandidate | null {
+  if (pool.length <= 1) return null;
+
+  const maxRoomCount = Math.max(...pool.map((candidate) => candidate.metrics.roomCount));
+  const minRoomCount = Math.min(...pool.map((candidate) => candidate.metrics.roomCount));
+  if (maxRoomCount <= 1 || minRoomCount >= maxRoomCount) return null;
+
+  const tiedAtMax = pool.filter((candidate) => candidate.metrics.roomCount >= maxRoomCount - 1e-9);
+  tiedAtMax.sort(compareCandidatesForCarousel);
+  return tiedAtMax[0] ?? null;
 }
 
 function buildComparativeLeads(candidate: SlotCandidate, pool: SlotCandidate[]): string[] {
@@ -1009,9 +1032,9 @@ export function buildPositiveValidationReasons(input: {
     requiredAvailableCount === requiredCount &&
     optionalAvailableCount === optionalCount;
 
-  if (allAvailable) {
+  if (allAvailable && allCount > 1) {
     pushUniqueReason(reasons, "전 인원이 참석 가능해요.");
-  } else if (requiredCount > 0 && requiredAvailableCount === requiredCount) {
+  } else if (requiredCount > 0 && requiredAvailableCount === requiredCount && allCount > 1) {
     pushUniqueReason(reasons, `필수 참석자 ${requiredCount}명 모두 참석 가능해요.`);
   }
 
@@ -1024,12 +1047,11 @@ export function buildPositiveValidationReasons(input: {
       pushUniqueReason(reasons, line);
     }
 
-    const maxRoomCount = Math.max(...input.pool.map((candidate) => candidate.metrics.roomCount));
+    const roomCountLeader = getRoomCountComparativeLeader(input.pool);
     if (
       input.requiredRoom &&
-      input.candidate.metrics.roomCount >= maxRoomCount &&
-      maxRoomCount > 1 &&
-      input.pool.filter((candidate) => candidate.metrics.roomCount >= maxRoomCount - 1e-9).length < input.pool.length
+      roomCountLeader &&
+      slotTimeKey(input.candidate.start) === slotTimeKey(roomCountLeader.start)
     ) {
       pushUniqueReason(reasons, "다른 후보보다 회의실 선택지가 많아요.");
     }
@@ -1041,7 +1063,12 @@ export function buildPositiveValidationReasons(input: {
     allCount > 0 &&
     bufferOkCount >= bufferThreshold
   ) {
-    pushUniqueReason(reasons, `${allCount}명 중 ${bufferOkCount}명, 회의 전후 30분 일정이 비어 있어요.`);
+    pushUniqueReason(
+      reasons,
+      allCount === 1
+        ? "회의 전후 30분 일정이 비어 있어요."
+        : `${allCount}명 중 ${bufferOkCount}명, 회의 전후 30분 일정이 비어 있어요.`,
+    );
   }
 
   if (input.occasion === "lunch") {

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   PURPOSE_DEFAULT,
   buildPositiveValidationReasons,
@@ -36,11 +37,11 @@ import { AdminPanel } from "./admin/AdminPanel";
 import { resolveJobShort, personMatchesRoleSearch } from "./admin/jobUtils";
 import { PersonMeta } from "./components/PersonMeta";
 import {
-  AI_LOADING_STEP_COUNT,
   AI_RESULTS_DELAY_MS,
   AI_STEP_ACTIVE_MS,
   AI_STEP_DONE_HOLD_MS,
   AiThinkingStepList,
+  getAiLoadingStepCount,
 } from "./components/AiThinkingLoader";
 import arrowLeftIcon from "./assets/icons/icon-arrow-left-small-mono.svg?raw";
 import arrowRightIcon from "./assets/icons/icon-arrow-right-small-mono.svg?raw";
@@ -226,7 +227,7 @@ function AttendeeSearchRow({ person, jobs, isAdded, isActive, isHovered, onHover
   );
 }
 
-function RoomListRow({ room, isSelected, isHovered, onHover, onLeave, onSelect }) {
+function RoomListRow({ room, isSelected, isHovered, onHover, onLeave, onSelect, bleed = true }) {
   const highlighted = isHovered || isSelected;
   return (
     <div
@@ -238,7 +239,7 @@ function RoomListRow({ room, isSelected, isHovered, onHover, onLeave, onSelect }
         alignItems: "center",
         gap: 10,
         cursor: "pointer",
-        margin: "0 -8px",
+        margin: bleed ? "0 -8px" : 0,
         padding: 8,
         borderRadius: 10,
         background: highlighted ? HOVER_OVERLAY : "transparent",
@@ -284,7 +285,7 @@ function WizardAttendeeRow({ person, jobs, isOptional, onToggleOptional, onRemov
 }
 
 const MODAL_WIDTH = 460;
-const RECOMMEND_MODAL_WIDTH = 512;
+const RECOMMEND_MODAL_WIDTH = 528;
 const WIZARD_MODAL_MIN_HEIGHT = 560;
 const WIZARD_DETAILS_REVEAL_MAX = 1600;
 const WIZARD_DETAILS_REVEAL_MS = 490;
@@ -304,9 +305,9 @@ const ROOM_SECTION_MARGIN = SECTION_GAP;
 const ROOM_PICKER_LABEL_HEIGHT = 30;
 const ROOM_PICKER_BUTTON_HEIGHT = 48;
 const ROOM_PICKER_BLOCK_HEIGHT = ROOM_PICKER_LABEL_HEIGHT + ROOM_PICKER_BUTTON_HEIGHT;
-const RECOMMEND_EXIT_MS = 330;
-const RECOMMEND_HEADER_MORPH_MS = 350;
-const RECOMMEND_RESULTS_ENTER_MS = 430;
+const RECOMMEND_EXIT_MS = 200;
+const RECOMMEND_HEADER_MORPH_MS = 220;
+const RECOMMEND_RESULTS_ENTER_MS = 280;
 const RECOMMEND_MODAL_SIZE_ANIM_MS = 480;
 const RECOMMEND_EXIT_EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 const RECOMMEND_EXIT_TRANSITION = `opacity ${RECOMMEND_EXIT_MS}ms ease, transform ${RECOMMEND_EXIT_MS}ms ${RECOMMEND_EXIT_EASE}`;
@@ -434,7 +435,10 @@ function normalizeCompanySettings(value) {
   };
 }
 const TYPE_LABEL = { meeting: "미팅", focus: "집중 근무", personal: "개인 일정", external: "외근", ooo: "휴가/OOO", lunch: "점심" };
-const DAY_LABEL = ["월", "화", "수", "목", "금"];
+const DAY_LABEL = ["월", "화", "수", "목", "금", "토", "일"];
+const CALENDAR_WEEKDAY_COUNT = 5;
+const CALENDAR_WEEKEND_EXPAND_MS = 380;
+const CALENDAR_WEEKEND_EXPAND_EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 const HOUR_HEIGHT = 72;
 const CALENDAR_BODY_HEIGHT = 24 * HOUR_HEIGHT;
 /** Initial scroll: align current-time indicator near top with minimal past-hour padding */
@@ -457,6 +461,11 @@ function decHourToKorean(h) {
   const hh12 = hh % 12 === 0 ? 12 : hh % 12;
   return mm === 0 ? `${period} ${hh12}시` : `${period} ${hh12}시 ${mm}분`;
 }
+function isWeekendDate(date) {
+  const day = date.getDay();
+  return day === 0 || day === 6;
+}
+
 function mondayOf(date) {
   const d = new Date(date);
   const day = d.getDay();
@@ -911,7 +920,7 @@ function createInitialRsvp() {
 }
 
 const TOAST_ENTER_MS = 280;
-const TOAST_HOLD_MS = 1000;
+const TOAST_HOLD_MS = 2000;
 const TOAST_EXIT_MS = 280;
 
 function ToastBanner({ message, viewDetail, onDismiss, onViewDetail }) {
@@ -1000,18 +1009,32 @@ export default function MeetingSchedulerApp() {
   const [events, setEvents] = usePersistentState(STORAGE_KEYS.events, createInitialEvents());
   const [visibleIds, setVisibleIds] = useState([ME_ID]);
   const [wizard, setWizard] = useState(null);
+  const [frozenRecommendations, setFrozenRecommendations] = useState(null);
   const [wizardSession, setWizardSession] = useState(0);
   const openWizard = (initial) => {
     setWizardSession((session) => session + 1);
+    setFrozenRecommendations(null);
     setWizard({ ...EMPTY_WIZARD, ...initial });
+  };
+  const closeWizard = () => {
+    setWizardSession((session) => session + 1);
+    setFrozenRecommendations(null);
+    setWizard(null);
   };
   const [detail, setDetail] = useState(null);
   const [toast, setToast] = useState(null);
   const toastIdRef = useRef(0);
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
+  const [showWeekend, setShowWeekend] = useState(() => isWeekendDate(new Date()));
   const [miniCalendarResetKey, setMiniCalendarResetKey] = useState(0);
+  const selectCalendarWeek = (date) => {
+    setShowWeekend(isWeekendDate(date));
+    setWeekStart(mondayOf(date));
+  };
   const goToToday = () => {
-    setWeekStart(mondayOf(new Date()));
+    const today = new Date();
+    setShowWeekend(isWeekendDate(today));
+    setWeekStart(mondayOf(today));
     setMiniCalendarResetKey((key) => key + 1);
   };
   const [rsvp, setRsvp] = usePersistentState(STORAGE_KEYS.rsvp, createInitialRsvp()); // `${groupId}:${personId}` -> 'yes' | 'no'
@@ -1265,17 +1288,59 @@ export default function MeetingSchedulerApp() {
         </OutlineSurfaceButton>
       </div>
       <div style={{ display: "flex", gap: 44, flex: 1, minHeight: 0, overflow: "hidden", paddingTop: 24 }}>
-        <Sidebar people={people} visibleIds={visibleIds} toggleVisible={toggleVisible} onResetAllCalendars={resetAllCalendarEvents} onCreate={() => openWizard({ step: "quickBase", origin: "toolbar", roomRequired: true })} weekStart={weekStart} setWeekStart={setWeekStart} miniCalendarResetKey={miniCalendarResetKey} />
+        <Sidebar people={people} visibleIds={visibleIds} toggleVisible={toggleVisible} onResetAllCalendars={resetAllCalendarEvents} onCreate={() => openWizard({ step: "quickBase", origin: "toolbar", roomRequired: true })} weekStart={weekStart} onSelectCalendarWeek={selectCalendarWeek} miniCalendarResetKey={miniCalendarResetKey} />
         <CalendarGrid
-          people={people} visibleIds={visibleIds} events={events} weekStart={weekStart} setWeekStart={setWeekStart} onGoToday={goToToday} rsvp={rsvp} companySettings={companySettings}
-          onEmptyClick={(day, hour) => openWizard({ origin: "calendar", dateStr: day, startHour: hour, endHour: hour + 1 })}
-          onEventClick={(personId, ev) => setDetail({ personId, ev })}
+          people={people} visibleIds={visibleIds} events={events} weekStart={weekStart} showWeekend={showWeekend} setWeekStart={setWeekStart} onGoToday={goToToday} rsvp={rsvp} companySettings={companySettings}
+          onEmptyClick={(day, hour) => openWizard({ origin: "calendar", dateStr: day, startHour: hour, endHour: hour + 1, attendees: { [ME_ID]: "required" } })}
+          onEventClick={(personId, ev) => {
+            closeWizard();
+            setDetail({ personId, ev });
+          }}
         />
       </div>
+
+      {wizard && (
+        <CreationWizard key={wizardSession} wizard={wizard} setWizard={setWizard} frozenCandidates={frozenRecommendations} setFrozenCandidates={setFrozenRecommendations} stackModalOpen={Boolean(detail)} people={people} jobs={jobs} events={eventsExcludingGroup(events, wizard.editGroupId)} companySettings={companySettings} rooms={rooms} visibleIds={visibleIds} onClose={closeWizard}
+          onOpenBlockingEvent={openBlockingEventFromCheckpoint}
+          onQuickCreate={(title, dateStr, startHour, durationMinutes, attendeeIds, roomId) => {
+            const start = `${dateStr}T${hourToTimeStr(startHour)}:00`;
+            const end = toLocalISO(addMin(toDate(start), durationMinutes));
+            const room = rooms.find((r) => r.id === roomId);
+            const requiredIds = attendeeIds.filter((id) => wizard.attendees[id] === "required");
+            const optionalIds = attendeeIds.filter((id) => wizard.attendees[id] === "optional");
+            const saved = saveMeetingFromWizard({
+              editGroupId: wizard.editGroupId,
+              title: title || "새 일정",
+              start,
+              end,
+              requiredIds: requiredIds.length ? requiredIds : attendeeIds,
+              optionalIds,
+              room,
+              checkpoints: [],
+            });
+            closeWizard();
+            showToast(wizard.editGroupId ? "일정이 수정되었어요." : "일정이 생성되었어요.", saved);
+          }}
+          onConfirm={(candidate, requiredIds, optionalIds, title) => {
+            const saved = saveMeetingFromWizard({
+              editGroupId: wizard.editGroupId,
+              title,
+              start: toLocalISO(candidate.start),
+              end: toLocalISO(candidate.end),
+              requiredIds,
+              optionalIds,
+              room: candidate.selectedRoom,
+              checkpoints: candidate.checkpoints,
+            });
+            closeWizard();
+            showToast(wizard.editGroupId ? "일정이 수정되었어요." : "일정이 생성되었어요.", saved);
+          }} />
+      )}
 
       {detail && (
         detail.ev.meetingMeta ? (
           <ConfirmedDetailModal personId={detail.personId} data={{ meta: detail.ev.meetingMeta, title: detail.ev.title, groupId: detail.ev.groupId }} people={people} onClose={() => setDetail(null)}
+            overlayZIndex={wizard ? 70 : 55}
             onEdit={detail.personId === ME_ID ? () => openMeetingEditor(detail.ev.groupId, detail.ev.meetingMeta, detail.ev.title) : undefined}
             onDelete={detail.personId === ME_ID ? () => { deleteMeetingGroup(detail.ev.groupId); setDetail(null); } : undefined}
             rsvp={rsvp} setRsvp={setRsvp} />
@@ -1288,7 +1353,7 @@ export default function MeetingSchedulerApp() {
             jobs={jobs}
             allowReschedule={detail.allowReschedule}
             coordinationDraft={detail.coordinationDraft}
-            overlayZIndex={detail.allowReschedule && wizard ? 60 : 50}
+            overlayZIndex={wizard ? 70 : 55}
             onReschedule={(patch) => {
               updateEvent(detail.personId, detail.ev.id, patch);
               setDetail(null);
@@ -1308,44 +1373,6 @@ export default function MeetingSchedulerApp() {
             }}
           />
         )
-      )}
-
-      {wizard && (
-        <CreationWizard key={wizardSession} wizard={wizard} setWizard={setWizard} people={people} jobs={jobs} events={eventsExcludingGroup(events, wizard.editGroupId)} companySettings={companySettings} rooms={rooms} visibleIds={visibleIds} onClose={() => setWizard(null)}
-          onOpenBlockingEvent={openBlockingEventFromCheckpoint}
-          onQuickCreate={(title, dateStr, startHour, durationMinutes, attendeeIds, roomId) => {
-            const start = `${dateStr}T${hourToTimeStr(startHour)}:00`;
-            const end = toLocalISO(addMin(toDate(start), durationMinutes));
-            const room = rooms.find((r) => r.id === roomId);
-            const requiredIds = attendeeIds.filter((id) => wizard.attendees[id] === "required");
-            const optionalIds = attendeeIds.filter((id) => wizard.attendees[id] === "optional");
-            const saved = saveMeetingFromWizard({
-              editGroupId: wizard.editGroupId,
-              title: title || "새 일정",
-              start,
-              end,
-              requiredIds: requiredIds.length ? requiredIds : attendeeIds,
-              optionalIds,
-              room,
-              checkpoints: [],
-            });
-            setWizard(null);
-            showToast(wizard.editGroupId ? "일정이 수정되었어요." : "일정이 생성되었어요.", saved);
-          }}
-          onConfirm={(candidate, requiredIds, optionalIds, title) => {
-            const saved = saveMeetingFromWizard({
-              editGroupId: wizard.editGroupId,
-              title,
-              start: toLocalISO(candidate.start),
-              end: toLocalISO(candidate.end),
-              requiredIds,
-              optionalIds,
-              room: candidate.selectedRoom,
-              checkpoints: candidate.checkpoints,
-            });
-            setWizard(null);
-            showToast(wizard.editGroupId ? "일정이 수정되었어요." : "일정이 생성되었어요.", saved);
-          }} />
       )}
 
       {toast && (
@@ -1387,6 +1414,8 @@ export default function MeetingSchedulerApp() {
 
 /* ---------- Sidebar (미니 캘린더 + 캘린더 목록) ---------- */
 
+const MINI_CALENDAR_CELL = 34;
+
 function MiniMonthDay({ day, isWeekend, isToday, onClick }) {
   const [hover, setHover] = useState(false);
 
@@ -1400,18 +1429,20 @@ function MiniMonthDay({ day, isWeekend, isToday, onClick }) {
         position: "relative",
         border: "none",
         margin: 0,
-        width: "100%",
+        width: MINI_CALENDAR_CELL,
+        height: MINI_CALENDAR_CELL,
         boxSizing: "border-box",
-        padding: "4px 0",
+        padding: 0,
         background: "transparent",
         cursor: "pointer",
         fontFamily: FONT,
         fontSize: 15,
         fontWeight: isToday ? 700 : 500,
         color: isToday ? C.blue : isWeekend ? C.ink400 : C.ink900,
-        textAlign: "center",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         lineHeight: "20px",
-        overflow: "visible",
       }}
     >
       <span
@@ -1434,7 +1465,7 @@ function MiniMonthDay({ day, isWeekend, isToday, onClick }) {
   );
 }
 
-function MiniMonth({ weekStart, setWeekStart, miniCalendarResetKey = 0 }) {
+function MiniMonth({ weekStart, onSelectCalendarWeek, miniCalendarResetKey = 0 }) {
   const [viewMonth, setViewMonth] = useState(() => new Date(weekStart.getFullYear(), weekStart.getMonth(), 1));
   const [navHover, setNavHover] = useState(null);
 
@@ -1469,6 +1500,12 @@ function MiniMonth({ weekStart, setWeekStart, miniCalendarResetKey = 0 }) {
     padding: 0,
   });
 
+  const miniCalendarGridStyle = {
+    display: "grid",
+    gridTemplateColumns: `repeat(7, ${MINI_CALENDAR_CELL}px)`,
+    width: MINI_CALENDAR_CELL * 7,
+  };
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -1498,15 +1535,28 @@ function MiniMonth({ weekStart, setWeekStart, miniCalendarResetKey = 0 }) {
           </button>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", rowGap: 10, fontSize: 11, color: C.ink600, marginBottom: 10 }}>
+      <div style={{ ...miniCalendarGridStyle, rowGap: 10, fontSize: 11, color: C.ink600, marginBottom: 10 }}>
         {["월", "화", "수", "목", "금", "토", "일"].map((d, i) => (
-          <span key={d} style={{ color: i >= 5 ? C.ink500 : C.ink600, textAlign: "center" }}>{d}</span>
+          <span
+            key={d}
+            style={{
+              width: MINI_CALENDAR_CELL,
+              height: 16,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: i >= 5 ? C.ink500 : C.ink600,
+            }}
+          >
+            {d}
+          </span>
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", rowGap: 6, overflow: "visible" }}>
+      <div style={{ ...miniCalendarGridStyle, rowGap: 6 }}>
         {cells.map((d, i) => {
-          if (!d) return <span key={i} aria-hidden="true" />;
-          const isWeekend = (i % 7) >= 5;
+          if (!d) return <span key={i} aria-hidden="true" style={{ width: MINI_CALENDAR_CELL, height: MINI_CALENDAR_CELL }} />;
+          const col = i % 7;
+          const isWeekend = col >= 5;
           const isToday = isSameCalendarDay(new Date(displayYear, displayMonth, d), today);
           return (
             <MiniMonthDay
@@ -1514,11 +1564,32 @@ function MiniMonth({ weekStart, setWeekStart, miniCalendarResetKey = 0 }) {
               day={d}
               isWeekend={isWeekend}
               isToday={isToday}
-              onClick={() => setWeekStart(mondayOf(new Date(displayYear, displayMonth, d)))}
+              onClick={() => onSelectCalendarWeek(new Date(displayYear, displayMonth, d))}
             />
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function SidebarCheckbox({ checked, hover, checkedColor = C.ink900 }) {
+  return (
+    <div
+      style={{
+        width: 20,
+        height: 20,
+        borderRadius: 4,
+        background: checked ? checkedColor : "none",
+        border: checked ? "none" : `1.5px solid ${hover ? C.blue : C.border}`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        transition: "border-color 0.15s ease",
+        flexShrink: 0,
+      }}
+    >
+      {checked && <CalendarCheck size={14} color={C.white} />}
     </div>
   );
 }
@@ -1536,22 +1607,7 @@ function CalendarListItem({ person, checked, onToggle }) {
         onClick={onToggle}
         style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", flex: 1, minWidth: 0 }}
       >
-        <div
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: 4,
-            background: checked ? person.avatarText : "none",
-            border: checked ? "none" : `1.5px solid ${hover ? C.blue : C.border}`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transition: "border-color 0.15s ease",
-            flexShrink: 0,
-          }}
-        >
-          {checked && <CalendarCheck size={14} color={C.white} />}
-        </div>
+        <SidebarCheckbox checked={checked} hover={hover} checkedColor={person.avatarText} />
         <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>
           {person.name}{isMe ? " (나)" : ""}
         </span>
@@ -1560,7 +1616,7 @@ function CalendarListItem({ person, checked, onToggle }) {
   );
 }
 
-function Sidebar({ people, visibleIds, toggleVisible, onResetAllCalendars, onCreate, weekStart, setWeekStart, miniCalendarResetKey }) {
+function Sidebar({ people, visibleIds, toggleVisible, onResetAllCalendars, onCreate, weekStart, onSelectCalendarWeek, miniCalendarResetKey }) {
   const sortedPeople = useMemo(() => {
     const me = people.find((p) => p.id === ME_ID);
     const rest = people.filter((p) => p.id !== ME_ID).sort(sortByKoreanName);
@@ -1572,7 +1628,7 @@ function Sidebar({ people, visibleIds, toggleVisible, onResetAllCalendars, onCre
       <PrimaryButton data-tour="create-schedule" onClick={onCreate} style={{ width: "100%", minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 28 }}>
         <Plus size={18} /> 일정 추가하기
       </PrimaryButton>
-      <MiniMonth weekStart={weekStart} setWeekStart={setWeekStart} miniCalendarResetKey={miniCalendarResetKey} />
+      <MiniMonth weekStart={weekStart} onSelectCalendarWeek={onSelectCalendarWeek} miniCalendarResetKey={miniCalendarResetKey} />
       <div style={{ marginTop: 40 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 16, color: C.ink900 }}>캘린더 목록</div>
@@ -1640,7 +1696,7 @@ function CalendarNowIndicator({ top, variant = "day" }) {
   );
 }
 
-function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, onGoToday, rsvp, companySettings, onEmptyClick, onEventClick }) {
+function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, setWeekStart, onGoToday, rsvp, companySettings, onEmptyClick, onEventClick }) {
   const hours = [];
   for (let h = 0; h <= 23; h++) hours.push(h);
   const hourText = (h) => (h < 12 ? `오전 ${h === 0 ? 12 : h}시` : `오후 ${h === 12 ? 12 : h - 12}시`);
@@ -1655,12 +1711,15 @@ function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, onG
     didInitialScrollRef.current = true;
   }, []);
 
-  const displayDates = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
+  const displayDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const displayDays = displayDates.map(dateOnlyStr);
   const todayStr = getDemoTodayStr();
   const nowTop = getTimeOfDayTop(now);
   const showNowIndicator = displayDays.includes(todayStr);
-  const rangeLabel = `${weekStart.getMonth() + 1}월 ${weekStart.getDate()}일 - ${displayDates[4].getMonth() + 1}월 ${displayDates[4].getDate()}일`;
+  const rangeEndDate = showWeekend ? displayDates[6] : displayDates[CALENDAR_WEEKDAY_COUNT - 1];
+  const rangeLabel = `${weekStart.getMonth() + 1}월 ${weekStart.getDate()}일 - ${rangeEndDate.getMonth() + 1}월 ${rangeEndDate.getDate()}일`;
+  const calendarGridColumns = `${CALENDAR_TIME_COL_WIDTH}px repeat(${CALENDAR_WEEKDAY_COUNT}, minmax(0, 1fr)) ${showWeekend ? "repeat(2, minmax(0, 1fr))" : "0fr 0fr"}`;
+  const calendarGridTransition = `grid-template-columns ${CALENDAR_WEEKEND_EXPAND_MS}ms ${CALENDAR_WEEKEND_EXPAND_EASE}`;
 
   const NavBtn = ({ onClick, children }) => {
     const [hover, setHover] = useState(false);
@@ -1669,6 +1728,127 @@ function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, onG
         style={{ border: "none", background: hover ? C.bg2 : "none", borderRadius: 6, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
         {children}
       </button>
+    );
+  };
+
+  const renderDayHeader = (date, dayIndex) => {
+    const isWeekendCol = dayIndex >= CALENDAR_WEEKDAY_COUNT;
+    const isToday = isSameCalendarDay(date, new Date());
+    return (
+      <div
+        key={displayDays[dayIndex]}
+        style={{
+          textAlign: "center",
+          padding: "16px 0",
+          overflow: "hidden",
+          opacity: isWeekendCol && !showWeekend ? 0 : 1,
+          transition: `opacity ${CALENDAR_WEEKEND_EXPAND_MS}ms ease`,
+        }}
+      >
+        <div style={{ fontFamily: FONT, fontSize: 17, color: isToday ? C.blue : isWeekendCol ? C.ink400 : C.ink500, marginBottom: 4 }}>{DAY_LABEL[dayIndex]}</div>
+        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 25, color: isToday ? C.blue : isWeekendCol ? C.ink400 : C.ink900 }}>{date.getDate()}</div>
+      </div>
+    );
+  };
+
+  const renderDayColumn = (day, dayIndex) => {
+    const isWeekendCol = dayIndex >= CALENDAR_WEEKDAY_COUNT;
+    return (
+      <div
+        key={day}
+        style={{
+          position: "relative",
+          borderLeft: `1px solid ${C.bg2}`,
+          minHeight: CALENDAR_BODY_HEIGHT,
+          overflow: "hidden",
+          opacity: isWeekendCol && !showWeekend ? 0 : 1,
+          pointerEvents: isWeekendCol && !showWeekend ? "none" : "auto",
+          transition: `opacity ${CALENDAR_WEEKEND_EXPAND_MS}ms ease`,
+        }}
+      >
+        {/* 비선호 시간 배경 밴드 (회사 공통 설정 기반 위치) */}
+        <div style={{ position: "absolute", top: companySettings.lunchStart * HOUR_HEIGHT, height: (companySettings.lunchEnd - companySettings.lunchStart) * HOUR_HEIGHT, left: 0, right: 0, background: "rgba(17,24,39,0.02)", pointerEvents: "none" }}>
+          <div style={{ padding: 8, fontSize: 13, color: C.ink500, fontFamily: FONT }}>점심</div>
+        </div>
+        <div style={{ position: "absolute", top: companySettings.commuteOut * HOUR_HEIGHT, height: HOUR_HEIGHT, left: 0, right: 0, background: "rgba(17,24,39,0.02)", pointerEvents: "none" }}>
+          <div style={{ padding: 8, fontSize: 13, color: C.ink500, fontFamily: FONT }}>퇴근</div>
+        </div>
+        <div style={{ position: "absolute", top: (companySettings.commuteOut + 1) * HOUR_HEIGHT, height: (24 - companySettings.commuteOut - 1) * HOUR_HEIGHT, left: 0, right: 0, background: "rgba(17,24,39,0.02)", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", top: 0, height: companySettings.commuteIn * HOUR_HEIGHT, left: 0, right: 0, background: "rgba(17,24,39,0.02)", pointerEvents: "none" }}>
+          <div style={{ padding: 8, fontSize: 13, color: C.ink500, fontFamily: FONT }}>출근</div>
+        </div>
+
+        {hours.map((h) => (
+          <div key={h} onClick={() => onEmptyClick(day, h)} style={{ height: HOUR_HEIGHT, borderBottom: `1px solid ${C.bg2}`, cursor: "pointer", position: "relative", zIndex: 1 }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = HOVER_OVERLAY; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }} />
+        ))}
+
+        {day === todayStr && showNowIndicator && <CalendarNowIndicator top={nowTop} />}
+
+        {visibleIds.map((personId, pIdx) => {
+          const person = people.find((p) => p.id === personId);
+          const dayEvents = (events[personId] || []).filter((e) => e.start.startsWith(day));
+          const offset = pIdx * 6;
+          return dayEvents.map((ev) => {
+            const s = toDate(ev.start), e = toDate(ev.end);
+            const startH = s.getHours() + s.getMinutes() / 60;
+            const endH = e.getHours() + e.getMinutes() / 60;
+            const top = startH * HOUR_HEIGHT;
+            const height = Math.max((endH - startH) * HOUR_HEIGHT - 4, 20);
+            const isConfirmedMeeting = !!ev.groupId;
+            const rsvpStatus = isConfirmedMeeting ? rsvp?.[`${ev.groupId}:${personId}`] : null;
+
+            const durationMin = (e - s) / 60000;
+            const isCompact = durationMin <= 30;
+            const accent = person.avatarText;
+            let bg = accent;
+            let textColor = C.white;
+            let secondaryColor = C.white;
+            let border = "none";
+            let boxShadow = "none";
+            let strike = false;
+            if (isConfirmedMeeting) {
+              if (rsvpStatus === "yes") {
+                // 면 타입 — 진한 컬러 유지
+              } else if (rsvpStatus === "no") {
+                bg = C.bg2;
+                textColor = C.ink400;
+                secondaryColor = C.ink400;
+                strike = true;
+              } else {
+                // 라인 타입 — RSVP 미응답
+                bg = C.white;
+                textColor = C.ink900;
+                secondaryColor = C.ink500;
+                border = `1px solid ${accent}`;
+              }
+            }
+            const isFillType = !isConfirmedMeeting || rsvpStatus === "yes";
+            if (isFillType) {
+              boxShadow = `inset 0 0 0 1px ${C.white}`;
+            }
+
+            return (
+              <div key={ev.id} onClick={(evt) => { evt.stopPropagation(); onEventClick(personId, ev); }}
+                style={{
+                  position: "absolute", top, left: 4 + offset, right: 4, height, zIndex: 3, cursor: "pointer",
+                  background: bg, border, boxShadow, borderRadius: 8, padding: border === "none" ? 8 : 6, overflow: "hidden",
+                  boxSizing: "border-box",
+                }}>
+                <div style={{ display: "flex", flexDirection: isCompact ? "row" : "column", alignItems: isCompact ? "center" : "stretch", gap: isCompact ? 6 : 0, minWidth: 0 }}>
+                  <div style={{ fontFamily: FONT, fontSize: 13, fontWeight: 500, color: textColor, flexShrink: 0, textDecoration: strike ? "line-through" : "none" }}>
+                    {ev.title}
+                  </div>
+                  <div style={{ fontFamily: FONT, fontSize: 13, color: secondaryColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: isCompact ? 1 : undefined }}>
+                    {fmtAmPmRange(s, e)}
+                  </div>
+                </div>
+              </div>
+            );
+          });
+        })}
+      </div>
     );
   };
 
@@ -1698,113 +1878,53 @@ function CalendarGrid({ people, visibleIds, events, weekStart, setWeekStart, onG
           </OutlineSurfaceButton>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: `${CALENDAR_TIME_COL_WIDTH}px repeat(5, 1fr)`, flexShrink: 0 }}>
-        <div />
-        {displayDates.map((date, i) => {
-          const isToday = isSameCalendarDay(date, new Date());
-          return (
-            <div key={displayDays[i]} style={{ textAlign: "center", padding: "16px 0" }}>
-              <div style={{ fontFamily: FONT, fontSize: 17, color: isToday ? C.blue : C.ink500, marginBottom: 4 }}>{DAY_LABEL[i]}</div>
-              <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 25, color: isToday ? C.blue : C.ink900 }}>{date.getDate()}</div>
-            </div>
-          );
-        })}
-      </div>
-      <div ref={scrollRef} style={{ position: "relative", display: "grid", gridTemplateColumns: `${CALENDAR_TIME_COL_WIDTH}px repeat(5, 1fr)`, flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 24, borderTop: `1px solid ${C.border}` }}>
-        <div style={{ minHeight: CALENDAR_BODY_HEIGHT, position: "relative" }}>
-          {hours.map((h) => (
-            <div key={h} style={{ height: HOUR_HEIGHT, fontSize: 13, fontFamily: FONT, fontWeight: 500, color: C.ink500, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", transform: "translateY(-8px)" }}>
-              {hourText(h)}
-            </div>
-          ))}
-          {showNowIndicator && <CalendarNowIndicator top={nowTop} variant="time" />}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          minWidth: 0,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          transform: showWeekend ? "translateX(-12px)" : "translateX(0)",
+          transition: `transform ${CALENDAR_WEEKEND_EXPAND_MS}ms ${CALENDAR_WEEKEND_EXPAND_EASE}`,
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: calendarGridColumns,
+            flexShrink: 0,
+            transition: calendarGridTransition,
+          }}
+        >
+          <div />
+          {displayDates.map((date, i) => renderDayHeader(date, i))}
         </div>
-        {displayDays.map((day) => (
-          <div key={day} style={{ position: "relative", borderLeft: `1px solid ${C.bg2}`, minHeight: CALENDAR_BODY_HEIGHT }}>
-            {/* 비선호 시간 배경 밴드 (회사 공통 설정 기반 위치) */}
-            <div style={{ position: "absolute", top: companySettings.lunchStart * HOUR_HEIGHT, height: (companySettings.lunchEnd - companySettings.lunchStart) * HOUR_HEIGHT, left: 0, right: 0, background: "rgba(17,24,39,0.02)", pointerEvents: "none" }}>
-              <div style={{ padding: 8, fontSize: 13, color: C.ink500, fontFamily: FONT }}>점심</div>
-            </div>
-            <div style={{ position: "absolute", top: companySettings.commuteOut * HOUR_HEIGHT, height: HOUR_HEIGHT, left: 0, right: 0, background: "rgba(17,24,39,0.02)", pointerEvents: "none" }}>
-              <div style={{ padding: 8, fontSize: 13, color: C.ink500, fontFamily: FONT }}>퇴근</div>
-            </div>
-            <div style={{ position: "absolute", top: (companySettings.commuteOut + 1) * HOUR_HEIGHT, height: (24 - companySettings.commuteOut - 1) * HOUR_HEIGHT, left: 0, right: 0, background: "rgba(17,24,39,0.02)", pointerEvents: "none" }} />
-            <div style={{ position: "absolute", top: 0, height: companySettings.commuteIn * HOUR_HEIGHT, left: 0, right: 0, background: "rgba(17,24,39,0.02)", pointerEvents: "none" }}>
-              <div style={{ padding: 8, fontSize: 13, color: C.ink500, fontFamily: FONT }}>출근</div>
-            </div>
-
+        <div
+          ref={scrollRef}
+          style={{
+            position: "relative",
+            display: "grid",
+            gridTemplateColumns: calendarGridColumns,
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            paddingBottom: 24,
+            borderTop: `1px solid ${C.border}`,
+            transition: calendarGridTransition,
+          }}
+        >
+          <div style={{ minHeight: CALENDAR_BODY_HEIGHT, position: "relative" }}>
             {hours.map((h) => (
-              <div key={h} onClick={() => onEmptyClick(day, h)} style={{ height: HOUR_HEIGHT, borderBottom: `1px solid ${C.bg2}`, cursor: "pointer", position: "relative", zIndex: 1 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = HOVER_OVERLAY; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }} />
+              <div key={h} style={{ height: HOUR_HEIGHT, fontSize: 13, fontFamily: FONT, fontWeight: 500, color: C.ink500, textAlign: "right", paddingRight: 8, whiteSpace: "nowrap", transform: "translateY(-8px)" }}>
+                {hourText(h)}
+              </div>
             ))}
-
-            {day === todayStr && showNowIndicator && <CalendarNowIndicator top={nowTop} />}
-
-            {visibleIds.map((personId, pIdx) => {
-              const person = people.find((p) => p.id === personId);
-              const dayEvents = (events[personId] || []).filter((e) => e.start.startsWith(day));
-              const offset = pIdx * 6;
-              return dayEvents.map((ev) => {
-                const s = toDate(ev.start), e = toDate(ev.end);
-                const startH = s.getHours() + s.getMinutes() / 60;
-                const endH = e.getHours() + e.getMinutes() / 60;
-                const top = startH * HOUR_HEIGHT;
-                const height = Math.max((endH - startH) * HOUR_HEIGHT - 4, 20);
-                const isConfirmedMeeting = !!ev.groupId;
-                const rsvpStatus = isConfirmedMeeting ? rsvp?.[`${ev.groupId}:${personId}`] : null;
-
-                const durationMin = (e - s) / 60000;
-                const isCompact = durationMin <= 30;
-                const accent = person.avatarText;
-                let bg = accent;
-                let textColor = C.white;
-                let secondaryColor = C.white;
-                let border = "none";
-                let boxShadow = "none";
-                let strike = false;
-                if (isConfirmedMeeting) {
-                  if (rsvpStatus === "yes") {
-                    // 면 타입 — 진한 컬러 유지
-                  } else if (rsvpStatus === "no") {
-                    bg = C.bg2;
-                    textColor = C.ink400;
-                    secondaryColor = C.ink400;
-                    strike = true;
-                  } else {
-                    // 라인 타입 — RSVP 미응답
-                    bg = C.white;
-                    textColor = C.ink900;
-                    secondaryColor = C.ink500;
-                    border = `1px solid ${accent}`;
-                  }
-                }
-                const isFillType = !isConfirmedMeeting || rsvpStatus === "yes";
-                if (isFillType) {
-                  boxShadow = `inset 0 0 0 1px ${C.white}`;
-                }
-
-                return (
-                  <div key={ev.id} onClick={(evt) => { evt.stopPropagation(); onEventClick(personId, ev); }}
-                    style={{
-                      position: "absolute", top, left: 4 + offset, right: 4, height, zIndex: 2, cursor: "pointer",
-                      background: bg, border, boxShadow, borderRadius: 8, padding: border === "none" ? 8 : 6, overflow: "hidden",
-                      boxSizing: "border-box",
-                    }}>
-                    <div style={{ display: "flex", flexDirection: isCompact ? "row" : "column", alignItems: isCompact ? "center" : "stretch", gap: isCompact ? 6 : 0, minWidth: 0 }}>
-                      <div style={{ fontFamily: FONT, fontSize: 13, fontWeight: 500, color: textColor, flexShrink: 0, textDecoration: strike ? "line-through" : "none" }}>
-                        {ev.title}
-                      </div>
-                      <div style={{ fontFamily: FONT, fontSize: 13, color: secondaryColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: isCompact ? 1 : undefined }}>
-                        {fmtAmPmRange(s, e)}
-                      </div>
-                    </div>
-                  </div>
-                );
-              });
-            })}
+            {showNowIndicator && <CalendarNowIndicator top={nowTop} variant="time" />}
           </div>
-        ))}
+          {displayDays.map((day, i) => renderDayColumn(day, i))}
+        </div>
       </div>
     </div>
   );
@@ -1889,7 +2009,8 @@ function WizardExitConfirmDialog({ onCancel, onConfirm, zIndex = 60 }) {
 function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, animateSize = false, disableBackdropClose = false, exitConfirm, zIndex = 50 }) {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
 
-  const handleBackdropClick = () => {
+  const handleBackdropClick = (event) => {
+    event.stopPropagation();
     if (disableBackdropClose) {
       if (exitConfirm) setShowExitConfirm(true);
       return;
@@ -1897,7 +2018,7 @@ function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, an
     onClose?.();
   };
 
-  return (
+  return createPortal(
     <>
       <div
         style={{
@@ -1947,7 +2068,8 @@ function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, an
           }}
         />
       )}
-    </>
+    </>,
+    document.body,
   );
 }
 const MODAL_HEADER_INSET = 24;
@@ -2088,6 +2210,27 @@ function UnderlineEventButton({ children, onClick }) {
   );
 }
 
+function CheckpointTitleDescription({ checkpoint, checked = false, lineHeight = `${REFERENCE_CHECKPOINT_ROW_HEIGHT}px` }) {
+  const textColor = checked ? C.ink400 : C.ink900;
+  const descColor = checked ? C.ink400 : C.ink800;
+  const strike = checked ? "line-through" : "none";
+
+  return (
+    <div style={{ fontFamily: FONT, fontSize: 15, color: textColor, lineHeight, fontWeight: 400 }}>
+      {checkpoint.title ? (
+        <>
+          <span style={{ fontWeight: 500, textDecoration: strike }}>{checkpoint.title}</span>
+          {checkpoint.description ? (
+            <span style={{ marginLeft: 6, color: descColor, fontWeight: 400, textDecoration: strike }}>{checkpoint.description}</span>
+          ) : null}
+        </>
+      ) : (
+        <span style={{ textDecoration: strike }}>{checkpoint.description}</span>
+      )}
+    </div>
+  );
+}
+
 function ReferenceCheckpointRow({ checkpoint }) {
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
@@ -2150,6 +2293,8 @@ function CoordinationCheckpointRow({ checkpoint, onOpenBlockingEvent }) {
 
 /* ---------- (QuickAddModal was merged into the unified CreationWizard) ---------- */
 
+const EVENT_DETAIL_SECTION_GAP = 32;
+
 function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelete, allowReschedule, onReschedule, coordinationDraft, onCopySuggestion, overlayZIndex = 50 }) {
   const start = toDate(ev.start);
   const end = toDate(ev.end);
@@ -2187,7 +2332,8 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
   const room = ev.room ?? ev.meetingMeta?.room;
   const showRoom = ev.type === "meeting" || !!room;
 
-  const copyCoordinationDraft = async () => {
+  const copyCoordinationDraft = async (event) => {
+    event?.stopPropagation();
     if (!coordinationDraft) return;
     try {
       await navigator.clipboard.writeText(coordinationDraft);
@@ -2196,6 +2342,11 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
       onCopySuggestion?.();
     }
   };
+
+  const hasAttendeeSection = attendeePeople.length > 0 && !editing;
+  const hasCoordinationSection = Boolean(coordinationDraft && !editing);
+  const hasRescheduleGuideSection = showOwnRescheduleGuide && !coordinationDraft;
+  const hasFollowingDetailSection = hasAttendeeSection || hasCoordinationSection || hasRescheduleGuideSection;
 
   return (
     <Overlay onClose={onClose} zIndex={overlayZIndex}>
@@ -2209,7 +2360,7 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
       ) : (
         <PanelHeader title={ev.title} onClose={onClose} />
       )}
-      <div style={{ padding: "0 24px 24px 24px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ padding: `0 24px ${hasFollowingDetailSection ? 0 : 24}px`, display: "flex", flexDirection: "column", gap: 10 }}>
         {!editing ? (
           <>
             <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 15, color: C.ink900 }}>
@@ -2267,8 +2418,8 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
         </div>
       )}
 
-      {attendeePeople.length > 0 && !editing && (
-        <div style={{ padding: coordinationDraft || showOwnRescheduleGuide ? "20px 24px 0" : "20px 24px 48px" }}>
+      {hasAttendeeSection && (
+        <div style={{ padding: `${EVENT_DETAIL_SECTION_GAP}px 24px ${hasCoordinationSection || hasRescheduleGuideSection ? 0 : 48}px` }}>
           <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, marginBottom: 16 }}>참석자</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px 16px" }}>
             {attendeePeople.map((p) => (
@@ -2286,8 +2437,8 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
         </div>
       )}
 
-      {coordinationDraft && !editing && (
-        <div style={{ padding: "32px 24px 48px" }}>
+      {hasCoordinationSection && (
+        <div style={{ padding: `${EVENT_DETAIL_SECTION_GAP}px 24px 48px` }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.ink900 }}>이렇게 보내보세요</div>
             <button
@@ -2330,8 +2481,8 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
         </div>
       )}
 
-      {showOwnRescheduleGuide && (
-        <div style={{ padding: "32px 24px 48px" }}>
+      {hasRescheduleGuideSection && (
+        <div style={{ padding: `${EVENT_DETAIL_SECTION_GAP}px 24px 48px` }}>
           <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.ink900 }}>일정을 옮겨 보세요</div>
           <div
             style={{
@@ -2432,10 +2583,12 @@ function applyWizardTitleChange(wizard, title, companySettings) {
   return next;
 }
 
-function CreationWizard({ wizard, setWizard, people, jobs, events, companySettings, rooms, visibleIds, onClose, onConfirm, onQuickCreate, onOpenBlockingEvent }) {
+function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesProp, setFrozenCandidates: setFrozenCandidatesProp, stackModalOpen = false, people, jobs, events, companySettings, rooms, visibleIds, onClose, onConfirm, onQuickCreate, onOpenBlockingEvent }) {
   const [index, setIndex] = useState(0);
   const pinnedCandidateKeyRef = React.useRef(null);
-  const [frozenCandidates, setFrozenCandidates] = useState(null);
+  const [frozenCandidatesFallback, setFrozenCandidatesFallback] = useState(null);
+  const frozenCandidates = setFrozenCandidatesProp ? frozenCandidatesProp : frozenCandidatesFallback;
+  const setFrozenCandidatesState = setFrozenCandidatesProp ?? setFrozenCandidatesFallback;
   const [loadingStepIndex, setLoadingStepIndex] = useState(0);
   const [loadingStepPhase, setLoadingStepPhase] = useState("working");
   const [loadingExiting, setLoadingExiting] = useState(false);
@@ -2450,9 +2603,31 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
   const attendeesSnapshotRef = React.useRef(null);
   const prevWizardStepRef = React.useRef(wizard.step);
   const revealStartedRef = React.useRef(false);
+  const recommendationsLockedRef = React.useRef(false);
   const titleInputRef = React.useRef(null);
 
-  const openAttendeesStep = () => setWizard({ ...wizard, step: "attendees", search: "" });
+  const restoreRecommendationsView = React.useCallback(() => {
+    recommendationsLockedRef.current = true;
+    setLoadingExiting(true);
+    setHeaderRevealed(true);
+    setResultsEntering(true);
+    revealStartedRef.current = true;
+    setWizard((w) => {
+      if (w == null) return w;
+      return w.step === 3 && w.recommendationsReady
+        ? w
+        : { ...w, step: 3, returnToRecommendations: false, recommendationsReady: true };
+    });
+  }, [setWizard]);
+
+  React.useLayoutEffect(() => {
+    if (wizard.step !== 3 || !wizard.recommendationsReady) return;
+    if (headerRevealed && resultsEntering && loadingExiting) {
+      recommendationsLockedRef.current = true;
+      return;
+    }
+    restoreRecommendationsView();
+  }, [wizard.step, wizard.recommendationsReady, headerRevealed, resultsEntering, loadingExiting, restoreRecommendationsView]);
 
   React.useEffect(() => {
     if (wizard.step === "attendees" && prevWizardStepRef.current !== "attendees") {
@@ -2477,6 +2652,10 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
 
   const requiredIds = Object.keys(wizard.attendees).filter((id) => wizard.attendees[id] === "required");
   const optionalIds = Object.keys(wizard.attendees).filter((id) => wizard.attendees[id] === "optional");
+  const attendeeCountAll = Object.keys(wizard.attendees).length;
+  const isSoloAttendee = attendeeCountAll === 1 && Boolean(wizard.attendees[ME_ID]);
+  const roomRequired = wizard.roomRequired !== false;
+  const loadingStepCount = getAiLoadingStepCount({ soloOnly: isSoloAttendee, roomRequired });
 
   const normalizedCompanySettings = useMemo(
     () => normalizeCompanySettings(companySettings),
@@ -2528,10 +2707,9 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
   );
 
   React.useEffect(() => {
-    if (wizard.step !== "loading" && wizard.step !== 3) {
-      setFrozenCandidates(null);
-    }
-  }, [wizard.step]);
+    if (wizard.step === "loading" || wizard.step === 3 || wizard.returnToRecommendations) return;
+    setFrozenCandidatesState(null);
+  }, [wizard.step, wizard.returnToRecommendations, setFrozenCandidatesState]);
 
   const candidates = useMemo(() => {
     if (!inRecommendationFlow) return [];
@@ -2581,7 +2759,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
       count <= 0 ? 0 : count * rowHeight + (count - 1) * gap
     );
     const reasonsBlockHeight = (c) => {
-      if (buildCandidateCoordinationSection(c) || c.tier !== 1) return 0;
+      if (buildCandidateCoordinationSection(c)) return 0;
       const reasonCount = buildPositiveValidationReasons({
         ...getValidationReasonInput(c),
         pool: candidates,
@@ -2651,6 +2829,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
   const addAttendee = (id) => setWizard((w) => ({ ...w, attendees: { ...w.attendees, [id]: "required" } }));
   const removeAttendee = (id) => setWizard((w) => { const next = { ...w.attendees }; delete next[id]; return { ...w, attendees: next }; });
   const toggleOptional = (id) => setWizard((w) => ({ ...w, attendees: { ...w.attendees, [id]: w.attendees[id] === "optional" ? "required" : "optional" } }));
+  const openAttendeesStep = () => setWizard({ ...wizard, step: "attendees", search: "" });
 
   React.useEffect(() => {
     if (wizard.step !== "attendees") setHoveredAttendeeId(null);
@@ -2704,8 +2883,18 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
     return () => window.removeEventListener("keydown", handler);
   }, [wizard.step, attendeeSearchResults.length, handleAttendeeSearchKeyDown]);
 
-  const goToLoading = () => {
-    setFrozenCandidates(buildCandidates());
+  const backToRecommendations = restoreRecommendationsView;
+
+  const goToLoading = ({ refresh = false } = {}) => {
+    if (!refresh && (wizard.recommendationsReady || recommendationsLockedRef.current) && frozenCandidates) {
+      backToRecommendations();
+      return;
+    }
+    if (refresh) {
+      recommendationsLockedRef.current = false;
+      setWizard((w) => (w == null ? w : { ...w, recommendationsReady: false }));
+    }
+    setFrozenCandidatesState(buildCandidates());
     setLoadingStepIndex(0);
     setLoadingStepPhase("working");
     setIndex(0);
@@ -2713,23 +2902,30 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
     setHeaderRevealed(false);
     setResultsEntering(false);
     revealStartedRef.current = false;
-    setWizard({ ...wizard, step: "loading", returnToRecommendations: false });
-  };
-
-  const backToRecommendations = () => {
-    setLoadingExiting(true);
-    setHeaderRevealed(true);
-    setResultsEntering(true);
-    revealStartedRef.current = true;
-    setWizard({ ...wizard, step: 3, returnToRecommendations: false });
+    setWizard((w) => (w == null ? w : { ...w, step: "loading", returnToRecommendations: false }));
   };
 
   const disableBackdropClose =
+    stackModalOpen ||
     wizard.step === "attendees" ||
     wizard.step === "loading" ||
     wizard.step === 3 ||
     Boolean(wizard.returnToRecommendations);
   const wizardExitConfirm = disableBackdropClose ? { onConfirm: onClose } : undefined;
+
+  React.useEffect(() => {
+    if (wizard.step === 3 && resultsEntering && frozenCandidates) {
+      recommendationsLockedRef.current = true;
+    }
+  }, [wizard.step, resultsEntering, frozenCandidates]);
+
+  React.useEffect(() => {
+    if (wizard.step !== "loading") return;
+    if (wizard.returnToRecommendations) return;
+    if (wizard.recommendationsReady && frozenCandidates) {
+      backToRecommendations();
+    }
+  }, [wizard.step, wizard.recommendationsReady, wizard.returnToRecommendations, frozenCandidates, backToRecommendations]);
 
   React.useEffect(() => {
     if (wizard.step !== 3 || !current) return;
@@ -2759,7 +2955,8 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
 
   React.useEffect(() => {
     if (wizard.step !== "loading") return;
-    if (loadingStepIndex >= AI_LOADING_STEP_COUNT) return;
+    if (recommendationsLockedRef.current && frozenCandidates) return;
+    if (loadingStepIndex >= loadingStepCount) return;
 
     if (loadingStepPhase === "working") {
       const t = setTimeout(() => setLoadingStepPhase("completed"), AI_STEP_ACTIVE_MS);
@@ -2771,11 +2968,12 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
       setLoadingStepPhase("working");
     }, AI_STEP_DONE_HOLD_MS);
     return () => clearTimeout(t);
-  }, [wizard.step, loadingStepIndex, loadingStepPhase]);
+  }, [wizard.step, loadingStepIndex, loadingStepPhase, loadingStepCount]);
 
   React.useEffect(() => {
     if (wizard.step !== "loading") return;
-    if (loadingStepIndex < AI_LOADING_STEP_COUNT) return;
+    if (recommendationsLockedRef.current && frozenCandidates) return;
+    if (loadingStepIndex < loadingStepCount) return;
     if (revealStartedRef.current) return;
     revealStartedRef.current = true;
 
@@ -2783,7 +2981,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
     const tHeader = setTimeout(() => setHeaderRevealed(true), AI_RESULTS_DELAY_MS + RECOMMEND_EXIT_MS);
     const tResults = setTimeout(() => {
       setResultsEntering(true);
-      setWizard((w) => ({ ...w, step: 3 }));
+      setWizard((w) => (w == null ? w : { ...w, step: 3, recommendationsReady: true }));
     }, AI_RESULTS_DELAY_MS + RECOMMEND_EXIT_MS + RECOMMEND_HEADER_MORPH_MS);
 
     return () => {
@@ -2791,11 +2989,12 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
       clearTimeout(tHeader);
       clearTimeout(tResults);
     };
-  }, [wizard.step, loadingStepIndex, setWizard]);
+  }, [wizard.step, loadingStepIndex, setWizard, loadingStepCount]);
 
   React.useEffect(() => {
     if (wizard.step !== "loading") return;
-    if (loadingStepIndex < AI_LOADING_STEP_COUNT) return;
+    if (recommendationsLockedRef.current && frozenCandidates) return;
+    if (loadingStepIndex < loadingStepCount) return;
     if (headerRevealed && resultsEntering) return;
 
     const recovery = setTimeout(() => {
@@ -2803,11 +3002,15 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
       setLoadingExiting(true);
       setHeaderRevealed(true);
       setResultsEntering(true);
-      setWizard((w) => (w.step === "loading" ? { ...w, step: 3 } : w));
-    }, AI_RESULTS_DELAY_MS + RECOMMEND_EXIT_MS + RECOMMEND_HEADER_MORPH_MS + 320);
+      setWizard((w) => (
+        w == null || w.step !== "loading"
+          ? w
+          : { ...w, step: 3, recommendationsReady: true }
+      ));
+    }, AI_RESULTS_DELAY_MS + RECOMMEND_EXIT_MS + RECOMMEND_HEADER_MORPH_MS + 200);
 
     return () => clearTimeout(recovery);
-  }, [wizard.step, loadingStepIndex, headerRevealed, resultsEntering, setWizard]);
+  }, [wizard.step, loadingStepIndex, headerRevealed, resultsEntering, setWizard, loadingStepCount]);
 
   React.useEffect(() => {
     const handler = (e) => {
@@ -2820,25 +3023,29 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
   }, [wizard.step, candidates.length, resultsEntering]);
 
   const scheduleLabel = formatScheduleLabel(wizard.dateStr, wizard.startHour, wizard.durationMinutes, wizard.endHour);
-  const attendeeCountAll = Object.keys(wizard.attendees).length;
 
   const handleNext = () => {
     if (wizard.returnToRecommendations) {
-      backToRecommendations();
+      goToLoading({ refresh: true });
       return;
     }
-    if (attendeeCountAll > 1) {
-      goToLoading();
-    } else {
-      const defaults = getOccasionScheduleDefaults(wizard.title, normalizedCompanySettings, wizard.durationMinutes);
+    if (wizard.origin === "calendar" && isSoloAttendee) {
       onQuickCreate(
         wizard.title,
         wizard.dateStr,
-        defaults.startHour ?? wizard.startHour,
-        defaults.durationMinutes ?? resolvedDurationMinutes,
-        [ME_ID],
-        defaults.occasion !== "default" || wizard.roomRequired === false ? null : wizard.forcedRoomId,
+        wizard.startHour,
+        resolvedDurationMinutes,
+        Object.keys(wizard.attendees),
+        wizard.forcedRoomId,
       );
+      return;
+    }
+    if (attendeeCountAll > 0) {
+      if (recommendationsLockedRef.current) {
+        backToRecommendations();
+        return;
+      }
+      goToLoading();
     }
   };
 
@@ -2863,7 +3070,6 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
 
   if (wizard.step === "quickBase") {
     const selectedPeople = people.filter((p) => wizard.attendees[p.id]);
-    const roomRequired = wizard.roomRequired !== false;
     return (
       <Overlay onClose={onClose} width={MODAL_WIDTH} disableBackdropClose={disableBackdropClose} exitConfirm={wizardExitConfirm}>
         <form onSubmit={handleBaseFormSubmit} style={{ display: "flex", flexDirection: "column" }}>
@@ -3202,7 +3408,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
             style={{
               opacity: headerRevealed ? 1 : 0,
               transform: headerRevealed ? "translateY(0)" : "translateY(8px)",
-              transition: `opacity 0.34s ease 0.03s, transform 0.34s ${RECOMMEND_EXIT_EASE} 0.03s`,
+              transition: `opacity ${RECOMMEND_HEADER_MORPH_MS}ms ease 0.03s, transform ${RECOMMEND_HEADER_MORPH_MS}ms ${RECOMMEND_EXIT_EASE} 0.03s`,
               position: headerRevealed ? "relative" : "absolute",
               inset: 0,
               pointerEvents: headerRevealed ? "auto" : "none",
@@ -3241,9 +3447,16 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
         >
           <div style={{ padding: "10px 24px 40px 24px" }}>
             <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900, marginBottom: 20 }}>
-              가능한 일정을 찾아볼게요
+              {isSoloAttendee ? "내 일정에서 가능한 시간을 찾아볼게요" : "가능한 일정을 찾아볼게요"}
             </div>
-            <AiThinkingStepList loadingStepIndex={loadingStepIndex} loadingStepPhase={loadingStepPhase} Check={Check} Spinner={Spinner} />
+            <AiThinkingStepList
+              loadingStepIndex={loadingStepIndex}
+              loadingStepPhase={loadingStepPhase}
+              soloOnly={isSoloAttendee}
+              roomRequired={roomRequired}
+              Check={Check}
+              Spinner={Spinner}
+            />
           </div>
         </div>
 
@@ -3321,7 +3534,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
                       </div>
                     )}
 
-                    {!candidateCoordinationSection && current?.tier === 1 && (
+                    {!candidateCoordinationSection && displayValidationReasons.length > 0 && (
                       <div style={{ padding: "0 24px", marginTop: REASON_LIST_MARGIN_TOP, display: "flex", flexDirection: "column", gap: REASON_ROW_GAP }}>
                         {displayValidationReasons.map((r, i) => (
                           <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start", fontSize: 15, lineHeight: "20px", color: C.ink900 }}>
@@ -3338,7 +3551,7 @@ function CreationWizard({ wizard, setWizard, people, jobs, events, companySettin
                             참고할 점
                           </div>
                           <div style={{ fontFamily: FONT, fontSize: 13, color: C.ink500, marginTop: 4, lineHeight: "18px" }}>
-                            이 회의로 확정 시 챙겨드릴게요.
+                            확정 시 챙겨드릴게요.
                           </div>
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: CHECKPOINT_ROW_GAP }}>
@@ -3468,6 +3681,7 @@ function RoomPicker({ current, selectedRoomId, onSelectRoom }) {
                   <RoomListRow
                     key={candidateRoom.id}
                     room={candidateRoom}
+                    bleed={false}
                     isSelected={candidateRoom.id === room.id}
                     isHovered={hoveredRoomId === candidateRoom.id}
                     onHover={() => setHoveredRoomId(candidateRoom.id)}
@@ -3492,15 +3706,41 @@ function RoomPicker({ current, selectedRoomId, onSelectRoom }) {
   );
 }
 
+function CheckpointRow({ checkpoint, checked, onToggle }) {
+  const [hover, setHover] = useState(false);
+
+  return (
+    <div
+      role="checkbox"
+      aria-checked={checked}
+      tabIndex={0}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
+      style={{ display: "flex", gap: 12, alignItems: "flex-start", cursor: "pointer" }}
+    >
+      <SidebarCheckbox checked={checked} hover={hover} />
+      <CheckpointTitleDescription checkpoint={checkpoint} checked={checked} lineHeight="20px" />
+    </div>
+  );
+}
+
 /* ---------- Confirmed detail (참석자 + 챙길 점) ---------- */
 
-function ConfirmedDetailModal({ personId, data, people, onClose, onDelete, onEdit, rsvp, setRsvp }) {
+function ConfirmedDetailModal({ personId, data, people, onClose, onDelete, onEdit, rsvp, setRsvp, overlayZIndex = 55 }) {
   const { meta, title, groupId } = data;
   const start = toDate(meta.start), end = toDate(meta.end);
   const [checks, setChecks] = useState({});
   const requiredPeople = (meta.requiredIds ?? []).map((id) => people.find((p) => p.id === id)).filter(Boolean);
   const optionalPeople = (meta.optionalIds ?? []).map((id) => people.find((p) => p.id === id)).filter(Boolean);
   const checkpoints = personId === ME_ID ? (meta.checkpoints ?? []) : [];
+  const hasCheckpointsSection = checkpoints.length > 0;
 
   const toggleCheck = (i) => setChecks((c) => ({ ...c, [i]: !c[i] }));
   const rsvpKey = (id) => `${groupId}:${id}`;
@@ -3512,13 +3752,13 @@ function ConfirmedDetailModal({ personId, data, people, onClose, onDelete, onEdi
   });
 
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={onClose} zIndex={overlayZIndex}>
       {onDelete ? (
         <PanelHeaderWithActions title={title} onClose={onClose} onDelete={onDelete} onEdit={onEdit} />
       ) : (
         <PanelHeader title={title} onClose={onClose} />
       )}
-      <div style={{ padding: "0 24px 24px 24px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ padding: "0 24px 0", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 15, color: C.ink900 }}>
           <CalendarCheck2 size={16} color={C.ink500} /> {fmtDate(start)} {formatRelativeWeekdayLabel(start, getDemoTodayStr())}
         </div>
@@ -3531,29 +3771,35 @@ function ConfirmedDetailModal({ personId, data, people, onClose, onDelete, onEdi
         </div>
       </div>
 
-      <div style={{ padding: "20px 24px 48px" }}>
+      <div style={{ padding: `${EVENT_DETAIL_SECTION_GAP}px 24px ${hasCheckpointsSection ? 0 : 48}px` }}>
         <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, marginBottom: 16 }}>참석자</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px 16px" }}>
           {[...requiredPeople, ...optionalPeople].map((p) => {
             const isOptional = optionalPeople.includes(p);
+            const isHost = p.id === ME_ID;
             const status = rsvp[rsvpKey(p.id)] || "pending";
-            const statusLabel = status === "yes" ? "참석" : status === "no" ? "불참" : "미응답";
+            const badgeStatus = isHost ? "yes" : status;
+            const statusLabel = badgeStatus === "yes" ? "참석" : badgeStatus === "no" ? "불참" : "미응답";
+            const showRsvpBadge = isOptional || isHost;
             return (
               <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ position: "relative", cursor: isOptional ? "pointer" : "default" }} onClick={() => isOptional && cycleRsvp(p.id)}>
+                <div
+                  style={{ position: "relative", cursor: isOptional && !isHost ? "pointer" : "default" }}
+                  onClick={() => isOptional && !isHost && cycleRsvp(p.id)}
+                >
                   <Avatar person={p} />
-                  {isOptional && (
+                  {showRsvpBadge && (
                     <div style={{ position: "absolute", bottom: -2, right: -2, width: 16, height: 16, borderRadius: "50%", background: C.white, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      {status === "yes" && <div style={{ width: 14, height: 14, borderRadius: "50%", background: C.green500, display: "flex", alignItems: "center", justifyContent: "center" }}><Check size={9} color={C.white} /></div>}
-                      {status === "no" && <div style={{ width: 14, height: 14, borderRadius: "50%", background: "#ef4444", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={9} color={C.white} /></div>}
-                      {status === "pending" && <div style={{ width: 14, height: 14, borderRadius: "50%", background: C.ink400, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ width: 5, height: 5, borderRadius: "50%", background: C.white }} /></div>}
+                      {badgeStatus === "yes" && <div style={{ width: 14, height: 14, borderRadius: "50%", background: C.green500, display: "flex", alignItems: "center", justifyContent: "center" }}><Check size={9} color={C.white} /></div>}
+                      {badgeStatus === "no" && <div style={{ width: 14, height: 14, borderRadius: "50%", background: "#ef4444", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={9} color={C.white} /></div>}
+                      {badgeStatus === "pending" && <div style={{ width: 14, height: 14, borderRadius: "50%", background: C.ink400, display: "flex", alignItems: "center", justifyContent: "center" }}><div style={{ width: 5, height: 5, borderRadius: "50%", background: C.white }} /></div>}
                     </div>
                   )}
                 </div>
                 <div>
                   <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{p.name}</div>
                   <div style={{ fontFamily: FONT, fontSize: 14, color: C.ink500 }}>
-                    {p.id === ME_ID
+                    {isHost
                       ? (isOptional ? <>주최자 · 선택 참여 · <span style={{ fontWeight: 500 }}>{statusLabel}</span></> : "주최자")
                       : isOptional ? <>선택 참여 · <span style={{ fontWeight: 500 }}>{statusLabel}</span></> : ""}
                   </div>
@@ -3564,21 +3810,19 @@ function ConfirmedDetailModal({ personId, data, people, onClose, onDelete, onEdi
         </div>
       </div>
 
-      {checkpoints.length > 0 && (
-        <div style={{ padding: "20px 24px 48px" }}>
+      {hasCheckpointsSection && (
+        <div style={{ padding: `${EVENT_DETAIL_SECTION_GAP}px 24px 48px` }}>
           <div style={{ marginBottom: 14 }}>
             <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15 }}>챙길 점 <span style={{ color: C.ink500, fontWeight: 400 }}>(나만 보임)</span></span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {checkpoints.map((c, i) => (
-              <label key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start", cursor: "pointer" }}>
-                <div onClick={() => toggleCheck(i)} style={{ width: 16, height: 16, border: `1px solid ${C.ink500}`, borderRadius: 4, marginTop: 1, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: checks[i] ? C.ink500 : "none" }}>
-                  {checks[i] && <Check size={11} color={C.white} />}
-                </div>
-                <span style={{ fontFamily: FONT, fontSize: 15, color: checks[i] ? C.ink400 : C.ink900, textDecoration: checks[i] ? "line-through" : "none" }}>
-                  {c.description}
-                </span>
-              </label>
+              <CheckpointRow
+                key={i}
+                checkpoint={c}
+                checked={!!checks[i]}
+                onToggle={() => toggleCheck(i)}
+              />
             ))}
           </div>
         </div>
