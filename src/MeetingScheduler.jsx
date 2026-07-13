@@ -15,6 +15,7 @@ import {
   getRoomAssignmentReasonForCandidate,
   getValidationReasonInput,
   hourToTimeStr,
+  inferMeetingOccasion,
   isCandidateSelectable,
   isRequiredAttendanceMet,
   resolveCheckpointBlockingEvent,
@@ -62,9 +63,11 @@ import checkCircleFilledIcon from "./assets/icons/icon-check-circle-mono.svg?raw
 import pencilIcon from "./assets/icons/icon-pencil-mono.svg?raw";
 import copyIconUrl from "./assets/icons/icon-copy-mono.png";
 import settingIcon from "./assets/icons/icon-setting-mono.svg?raw";
+import arrowDownIcon from "./assets/icons/icon-arrow-down.svg?raw";
+import arrowUpIcon from "./assets/icons/icon-arrow-up.svg?raw";
 
 const ICONS = {
-  ChevronLeft: arrowLeftIcon, ChevronRight: arrowRightIcon, X: closeIcon, Plus: plusIcon, Search: searchIcon, Check: checkIcon,
+  ChevronLeft: arrowLeftIcon, ChevronRight: arrowRightIcon, ChevronDown: arrowDownIcon, ChevronUp: arrowUpIcon, X: closeIcon, Plus: plusIcon, Search: searchIcon, Check: checkIcon,
   CalendarCheck: calendarCheckIcon,
   CalendarCheck2: calendarIcon, Clock: clockIcon, MapPin: pinIcon, Trash2: binIcon, Circle: circleIcon,
   CheckCircle2: checkCircleIcon, CheckCircleFilled: checkCircleFilledIcon,   Pencil: pencilIcon, Settings: settingIcon,
@@ -90,6 +93,8 @@ function SvgIcon({ name, size = 24, color = "currentColor", style, ...props }) {
 }
 const ChevronLeft = (p) => <SvgIcon name="ChevronLeft" {...p} />;
 const ChevronRight = (p) => <SvgIcon name="ChevronRight" {...p} />;
+const ChevronDown = (p) => <SvgIcon name="ChevronDown" {...p} />;
+const ChevronUp = (p) => <SvgIcon name="ChevronUp" {...p} />;
 const X = (p) => <SvgIcon name="X" {...p} />;
 const Plus = (p) => <SvgIcon name="Plus" {...p} />;
 const Search = (p) => <SvgIcon name="Search" {...p} />;
@@ -164,6 +169,8 @@ function sortAttendeeSearchResults(people, query, visibleIds, excludeIds = [], j
   ).filter((p) => !excludeSet.has(p.id));
 
   return filtered.sort((a, b) => {
+    if (a.id === ME_ID) return -1;
+    if (b.id === ME_ID) return 1;
     const aPriority = visibleSet.has(a.id) ? 0 : 1;
     const bPriority = visibleSet.has(b.id) ? 0 : 1;
     if (aPriority !== bPriority) return aPriority - bPriority;
@@ -185,8 +192,8 @@ function OptionalAttendeeToggle({ isOptional, onToggle }) {
         gap: 4,
         border: "none",
         borderRadius: 8,
-        height: 30,
-        padding: "0 10px",
+        height: 26,
+        padding: "0 8px",
         background: hover ? "#e4e7ea" : C.bg2,
         color: C.ink900,
         fontFamily: FONT,
@@ -222,7 +229,12 @@ function AttendeeSearchRow({ person, jobs, isAdded, isActive, isHovered, onHover
       }}
     >
       <Avatar person={person} />
-      <PersonMeta name={person.name} team={person.team} roleShort={resolveJobShort(jobs, person.role)} />
+      <PersonMeta
+        name={`${person.name}${person.id === ME_ID ? " (나)" : ""}`}
+        team={person.team}
+        roleShort={resolveJobShort(jobs, person.role)}
+        isHost={person.id === ME_ID}
+      />
       {isAdded ? <CheckCircleFilled size={20} color={C.green500} /> : <Circle size={20} color={C.border} />}
     </div>
   );
@@ -268,8 +280,22 @@ function RoomListRow({ room, isSelected, isHovered, onHover, onLeave, onSelect, 
 }
 
 function WizardAttendeeRow({ person, jobs, isOptional, onToggleOptional, onRemove }) {
+  const [hover, setHover] = useState(false);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        margin: "0 -8px",
+        padding: 8,
+        borderRadius: 10,
+        background: hover ? HOVER_OVERLAY : "transparent",
+        transition: "background 0.15s ease",
+      }}
+    >
       <Avatar person={person} />
       <PersonMeta
         name={person.name}
@@ -300,9 +326,10 @@ const COORDINATION_CHECKPOINT_ROW_HEIGHT = 20;
 const CHECKPOINT_SECTION_HEADER = 54;
 const COORDINATION_SECTION_HEADLINE_HEIGHT = 22;
 const COORDINATION_SECTION_GAP = 12;
-const COORDINATION_SECTION_MARGIN = 32;
-const SECTION_GAP = 32;
-const REASON_LIST_MARGIN_TOP = SECTION_GAP;
+const SECTION_GAP = 40;
+const COORDINATION_SECTION_MARGIN = SECTION_GAP;
+/** 상대 요일 라벨(이번 주 화요일 등) ↔ 추천 사유 목록 */
+const REASON_LIST_MARGIN_TOP = 28;
 const CHECKPOINT_SECTION_MARGIN = SECTION_GAP;
 const ROOM_SECTION_MARGIN = SECTION_GAP;
 const ROOM_PICKER_LABEL_HEIGHT = 30;
@@ -349,7 +376,7 @@ function getRecommendationDateSectionHeight(hasCoordinationHint) {
 
 const STORAGE_KEYS = {
   people: "meeting-scheduler:people-v5",
-  events: "meeting-scheduler:events-v22",
+  events: "meeting-scheduler:events-v23",
   jobs: "meeting-scheduler:jobs",
   companySettings: "meeting-scheduler:company-settings-v2",
   rooms: "meeting-scheduler:rooms",
@@ -797,7 +824,7 @@ function DurationInputDialog({ onClose, onConfirm, zIndex = 70 }) {
         >
           소요 시간을 입력해 주세요
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16, width: "100%" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 16, width: "100%" }}>
           <div style={unitGroupStyle}>
             <input
               ref={hoursInputRef}
@@ -994,7 +1021,7 @@ function WizardDurationToggle({ dateStr, startHour, endHour, durationMinutes, du
             lineHeight: "18px",
           }}
         >
-          적절한 시간을 찾아드려요.
+          소요시간에 맞춰 확정 가능한 일정을 찾아드릴게요.
         </div>
       </div>
       {showDurationInput && (
@@ -1015,7 +1042,25 @@ function WizardDurationToggle({ dateStr, startHour, endHour, durationMinutes, du
    5. APP
    ============================================================ */
 
-const EMPTY_WIZARD = { step: "base", title: "", dateStr: getDemoTodayStr(), startHour: 10, endHour: 11, durationMinutes: 60, durationPreset: 60, roomRequired: true, forcedRoomId: null, purpose: PURPOSE_DEFAULT, attendees: { yj: "required" }, search: "", editGroupId: null, basePhase: "title" };
+const EMPTY_WIZARD = {
+  step: "base",
+  title: "",
+  dateStr: getDemoTodayStr(),
+  startHour: 10,
+  endHour: 11,
+  durationMinutes: 60,
+  durationPreset: 60,
+  roomRequired: true,
+  forcedRoomId: null,
+  purpose: PURPOSE_DEFAULT,
+  attendees: { yj: "required" },
+  search: "",
+  editGroupId: null,
+  basePhase: "title",
+  recommendSettingsOpen: false,
+  avoidSoftTimes: true,
+  avoidBusyDays: true,
+};
 
 function inferDurationPreset(durationMinutes) {
   if (durationMinutes === 60) return 60;
@@ -1074,18 +1119,34 @@ function WizardDatetimeStep({ wizard, setWizard, onClose, disableBackdropClose, 
   const endTimeRef = useRef(null);
   const hasStart = wizard.startHour != null;
   const hasEnd = wizard.endHour != null;
+
+  useEffect(() => {
+    if (wizard.startHour == null || wizard.endHour != null) return;
+    const endHour = Math.min(24, wizard.startHour + 1);
+    setWizard((w) => {
+      if (w == null || w.startHour == null || w.endHour != null) return w;
+      return {
+        ...w,
+        endHour,
+        durationMinutes: Math.round((endHour - w.startHour) * 60),
+      };
+    });
+  }, [wizard.startHour, wizard.endHour, setWizard]);
+
   const updateStart = (value) => {
     if (!value) {
       setWizard({ ...wizard, startHour: null, endHour: null, durationMinutes: "custom" });
       return;
     }
     const nextStart = timeStrToHour(value);
-    const nextEnd = hasEnd ? Math.max(wizard.endHour, nextStart + 0.5) : null;
+    const nextEnd = hasEnd
+      ? Math.max(wizard.endHour, nextStart + 0.5)
+      : Math.min(24, nextStart + 1);
     setWizard({
       ...wizard,
       startHour: nextStart,
       endHour: nextEnd,
-      durationMinutes: nextEnd != null ? Math.round((nextEnd - nextStart) * 60) : "custom",
+      durationMinutes: Math.round((nextEnd - nextStart) * 60),
     });
   };
   const updateEnd = (value) => {
@@ -1109,7 +1170,7 @@ function WizardDatetimeStep({ wizard, setWizard, onClose, disableBackdropClose, 
   return (
     <Overlay onClose={onClose} disableBackdropClose={disableBackdropClose} exitConfirm={exitConfirm}>
       <PanelHeader title="언제로 할까요?" onClose={onClose} />
-      <div style={{ padding: "10px 24px", display: "flex", flexDirection: "column", gap: 24 }}>
+      <div style={{ padding: "10px 24px", display: "flex", flexDirection: "column", gap: SECTION_GAP }}>
         <Field label="날짜">
           <div className="wizard-outline-control" style={{ ...inputWrap, cursor: "text" }}>
             <CalendarCheck2 size={20} color={C.ink600} />
@@ -1326,6 +1387,20 @@ export default function MeetingSchedulerApp() {
   const [detail, setDetail] = useState(null);
   const [toast, setToast] = useState(null);
   const toastIdRef = useRef(0);
+  const [highlightGroupId, setHighlightGroupId] = useState(null);
+  const highlightClearRef = useRef(null);
+  const pulseCreatedMeeting = (groupId) => {
+    if (!groupId) return;
+    if (highlightClearRef.current) clearTimeout(highlightClearRef.current);
+    setHighlightGroupId(groupId);
+    highlightClearRef.current = setTimeout(() => {
+      setHighlightGroupId(null);
+      highlightClearRef.current = null;
+    }, 2000);
+  };
+  useEffect(() => () => {
+    if (highlightClearRef.current) clearTimeout(highlightClearRef.current);
+  }, []);
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
   const [showWeekend, setShowWeekend] = useState(() => isWeekendDate(new Date()));
   const [miniCalendarResetKey, setMiniCalendarResetKey] = useState(0);
@@ -1625,6 +1700,7 @@ export default function MeetingSchedulerApp() {
         <Sidebar people={people} visibleIds={visibleIds} toggleVisible={toggleVisible} onResetAllCalendars={resetAllCalendarEvents} onCreate={() => openWizard({ step: "quickBase", origin: "toolbar", roomRequired: true })} weekStart={weekStart} onSelectCalendarWeek={selectCalendarWeek} miniCalendarResetKey={miniCalendarResetKey} />
         <CalendarGrid
           people={people} visibleIds={visibleIds} events={events} weekStart={weekStart} showWeekend={showWeekend} rsvp={rsvp} companySettings={companySettings}
+          highlightGroupId={highlightGroupId}
           onEmptyClick={(day, hour) => openWizard({
             origin: "calendar",
             dateStr: day,
@@ -1661,6 +1737,7 @@ export default function MeetingSchedulerApp() {
               checkpoints: [],
             });
             closeWizard();
+            pulseCreatedMeeting(saved?.groupId);
             showToast(wizard.editGroupId ? "일정이 수정되었어요." : "일정이 생성되었어요.", saved);
           }}
           onConfirm={(candidate, requiredIds, optionalIds, title) => {
@@ -1675,6 +1752,7 @@ export default function MeetingSchedulerApp() {
               checkpoints: candidate.checkpoints,
             });
             closeWizard();
+            pulseCreatedMeeting(saved?.groupId);
             showToast(wizard.editGroupId ? "일정이 수정되었어요." : "일정이 생성되었어요.", saved);
           }} />
       )}
@@ -2087,7 +2165,7 @@ function CalendarWeekNavButton({ onClick, children, ...rest }) {
   );
 }
 
-function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, rsvp, companySettings, onEmptyClick, onEventClick }) {
+function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, rsvp, companySettings, highlightGroupId, onEmptyClick, onEventClick }) {
   const hours = [];
   for (let h = 0; h <= 23; h++) hours.push(h);
   const hourText = (h) => (h < 12 ? `오전 ${h === 0 ? 12 : h}시` : `오후 ${h === 12 ? 12 : h - 12}시`);
@@ -2210,19 +2288,55 @@ function CalendarGrid({ people, visibleIds, events, weekStart, showWeekend, rsvp
             if (isFillType) {
               boxShadow = `inset 0 0 0 1px ${C.white}`;
             }
+            const isRevealing = Boolean(highlightGroupId && ev.groupId === highlightGroupId);
+            const revealClass = isRevealing
+              ? (isFillType ? "calendar-event-reveal--fill" : "calendar-event-reveal--line")
+              : undefined;
 
             return (
-              <div key={ev.id} onClick={(evt) => { evt.stopPropagation(); onEventClick(personId, ev); }}
+              <div
+                key={ev.id}
+                className={revealClass}
+                onClick={(evt) => { evt.stopPropagation(); onEventClick(personId, ev); }}
                 style={{
-                  position: "absolute", top, left: 4 + offset, right: 4, height, zIndex: 3, cursor: "pointer",
-                  background: bg, border, boxShadow, borderRadius: 8, padding: border === "none" ? 8 : 6, overflow: "hidden",
+                  position: "absolute", top, left: 4 + offset, right: 4, height, zIndex: isRevealing ? 5 : 3, cursor: "pointer",
+                  background: isRevealing && isFillType ? C.white : bg,
+                  border: isRevealing && !isFillType ? `1px solid transparent` : border,
+                  boxShadow, borderRadius: 8, padding: border === "none" ? 8 : 6, overflow: "hidden",
                   boxSizing: "border-box",
-                }}>
-                <div style={{ display: "flex", flexDirection: isCompact ? "row" : "column", alignItems: isCompact ? "center" : "stretch", gap: isCompact ? 6 : 0, minWidth: 0 }}>
-                  <div style={{ fontFamily: FONT, fontSize: 13, fontWeight: 500, color: textColor, flexShrink: 0, textDecoration: strike ? "line-through" : "none" }}>
+                  ...(isRevealing ? {
+                    "--event-reveal-bg": bg,
+                    "--event-reveal-accent": accent,
+                  } : null),
+                }}
+              >
+                <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: isCompact ? "row" : "column", alignItems: isCompact ? "center" : "stretch", gap: isCompact ? 6 : 0, minWidth: 0 }}>
+                  <div
+                    className={isRevealing && isFillType ? "calendar-event-reveal-title" : undefined}
+                    style={{
+                      fontFamily: FONT,
+                      fontSize: 13,
+                      fontWeight: 500,
+                      color: isRevealing && isFillType ? C.ink900 : textColor,
+                      flexShrink: 0,
+                      textDecoration: strike ? "line-through" : "none",
+                    }}
+                  >
                     {ev.title}
                   </div>
-                  <div style={{ fontFamily: FONT, fontSize: 13, color: secondaryColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: isCompact ? 1 : undefined }}>
+                  <div
+                    className={isRevealing && isFillType ? "calendar-event-reveal-sub" : undefined}
+                    style={{
+                      fontFamily: FONT,
+                      fontSize: 13,
+                      color: isRevealing && isFillType ? C.ink500 : secondaryColor,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      minWidth: 0,
+                      flex: isCompact ? 1 : undefined,
+                    }}
+                  >
                     {fmtAmPmRange(s, e)}
                   </div>
                 </div>
@@ -2363,6 +2477,72 @@ function WizardExitConfirmDialog({ onCancel, onConfirm, zIndex = 60 }) {
   );
 }
 
+const MODAL_FOOTER_DIVIDER_FADE_MS = 200;
+
+function useModalScrollBottomFade(watchKey) {
+  const ref = useRef(null);
+  const [showDivider, setShowDivider] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || watchKey == null) {
+      setShowDivider(false);
+      return undefined;
+    }
+
+    const update = () => {
+      const overflow = el.scrollHeight - el.clientHeight > 1;
+      const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setShowDivider(overflow && remaining > 1);
+    };
+
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    ro?.observe(el);
+    const mo = typeof MutationObserver !== "undefined" ? new MutationObserver(update) : null;
+    mo?.observe(el, { childList: true, subtree: true, characterData: true });
+
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro?.disconnect();
+      mo?.disconnect();
+    };
+  }, [watchKey]);
+
+  return { ref, showDivider };
+}
+
+function ModalFooterScrollDivider({ visible }) {
+  return (
+    <div
+      aria-hidden
+      style={{
+        height: 1,
+        flexShrink: 0,
+        background: C.border,
+        opacity: visible ? 1 : 0,
+        transition: `opacity ${MODAL_FOOTER_DIVIDER_FADE_MS}ms ease`,
+        pointerEvents: "none",
+      }}
+    />
+  );
+}
+
+/** 스크롤 본문 + 하단에 더 있을 때만 버튼 위 디바이더 표시. scrollable=false면 일반 블록. */
+function ModalScrollArea({ children, style, watchKey, scrollable = true }) {
+  const { ref, showDivider } = useModalScrollBottomFade(scrollable ? watchKey : null);
+  if (!scrollable) {
+    return <div style={style}>{children}</div>;
+  }
+  return (
+    <>
+      <div ref={ref} style={style}>{children}</div>
+      <ModalFooterScrollDivider visible={showDivider} />
+    </>
+  );
+}
+
 function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, animateSize = false, disableBackdropClose = false, exitConfirm, zIndex = 50, sideNavLeft = null, sideNavRight = null }) {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
 
@@ -2385,9 +2565,7 @@ function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, an
         height: height ?? undefined,
         maxWidth: "94vw",
         maxHeight: "88vh",
-        overflow: height != null ? "hidden" : undefined,
-        overflowY: height == null ? "auto" : undefined,
-        overflowX: "hidden",
+        overflow: "hidden",
         fontFamily: FONT,
         display: "flex",
         flexDirection: "column",
@@ -2522,7 +2700,7 @@ function ModalCloseButton({ onClick, iconColor = C.ink600, size = 16, anchored =
 function PanelHeader({ title, onClose, showClose = true }) {
   return (
     <div style={{ position: "relative", padding: `${MODAL_HEADER_INSET}px ${MODAL_HEADER_INSET}px 20px ${MODAL_HEADER_INSET}px` }}>
-      <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 21, color: C.ink900 }}>{title}</span>
+      <span className="panel-header-title">{title}</span>
       {showClose && <ModalCloseButton onClick={onClose} anchored />}
     </div>
   );
@@ -2531,7 +2709,7 @@ function PanelHeaderWithActions({ title, onClose, onDelete, onEdit, editDisabled
   const actionBarWidth = MODAL_HEADER_ICON_SIZE * 3 + MODAL_HEADER_ICON_GAP * 2;
   return (
     <div style={{ position: "relative", padding: `${MODAL_HEADER_INSET}px ${MODAL_HEADER_INSET}px 20px ${MODAL_HEADER_INSET}px` }}>
-      <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 21, color: C.ink900, display: "block", paddingRight: actionBarWidth }}>{title}</span>
+      <span className="panel-header-title" style={{ display: "block", paddingRight: actionBarWidth }}>{title}</span>
       <div style={{ position: "absolute", top: MODAL_HEADER_INSET, right: MODAL_HEADER_INSET, display: "flex", alignItems: "center", gap: MODAL_HEADER_ICON_GAP, height: MODAL_HEADER_ICON_SIZE }}>
         <ModalHeaderIconButton onClick={onDelete} ariaLabel="삭제">
           <Trash2 size={MODAL_HEADER_ICON_SIZE} color={C.ink500} />
@@ -2665,7 +2843,7 @@ function CoordinationCheckpointRow({ checkpoint, onOpenBlockingEvent }) {
 
 /* ---------- (QuickAddModal was merged into the unified CreationWizard) ---------- */
 
-const EVENT_DETAIL_SECTION_GAP = 32;
+const EVENT_DETAIL_SECTION_GAP = SECTION_GAP;
 
 function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelete, allowReschedule, onReschedule, coordinationDraft, onCopySuggestion, overlayZIndex = 50 }) {
   const start = toDate(ev.start);
@@ -2792,7 +2970,7 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
 
       {hasAttendeeSection && (
         <div style={{ padding: `${EVENT_DETAIL_SECTION_GAP}px 24px ${hasCoordinationSection || hasRescheduleGuideSection ? 0 : 48}px` }}>
-          <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, marginBottom: 16 }}>참석자</div>
+          <div className="modal-section-label" style={{ marginBottom: 12, color: C.ink900 }}>참석자</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px 16px" }}>
             {attendeePeople.map((p) => (
               <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -2840,7 +3018,7 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
           </div>
           <div
             style={{
-              marginTop: 10,
+              marginTop: 12,
               borderRadius: 10,
               background: C.gray100,
               padding: "12px 14px",
@@ -2858,7 +3036,7 @@ function EventDetailModal({ personId, ev, people, events, jobs, onClose, onDelet
           <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.ink900 }}>일정을 옮겨 보세요</div>
           <div
             style={{
-              marginTop: 10,
+              marginTop: 12,
               borderRadius: 10,
               background: C.gray100,
               padding: "12px 14px",
@@ -2906,12 +3084,18 @@ function wizardTitleInputStyle() {
 }
 
 function wizardDetailsRevealStyle(revealed) {
-  const sectionGap = 30;
+  const sectionGap = SECTION_GAP;
+  // 추천 조건 설정 호버 등이 모달 패딩 쪽으로 8px 나가도 레이아웃(텍스트 기준선)은 유지
+  const hoverBleedX = 8;
   return {
     display: "flex",
     flexDirection: "column",
     gap: sectionGap,
     marginTop: revealed ? sectionGap : 0,
+    marginLeft: -hoverBleedX,
+    marginRight: -hoverBleedX,
+    paddingLeft: hoverBleedX,
+    paddingRight: hoverBleedX,
     overflow: "hidden",
     maxHeight: revealed ? WIZARD_DETAILS_REVEAL_MAX : 0,
     opacity: revealed ? 1 : 0,
@@ -3017,7 +3201,14 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
   const attendeeCountAll = Object.keys(wizard.attendees).length;
   const isSoloAttendee = attendeeCountAll === 1 && Boolean(wizard.attendees[ME_ID]);
   const roomRequired = wizard.roomRequired !== false;
-  const loadingStepCount = getAiLoadingStepCount({ soloOnly: isSoloAttendee, roomRequired });
+  const avoidSoftTimes = wizard.avoidSoftTimes !== false;
+  const meetingOccasion = inferMeetingOccasion(wizard.title || "");
+  const loadingStepCount = getAiLoadingStepCount({
+    soloOnly: isSoloAttendee,
+    roomRequired,
+    avoidSoftTimes,
+    occasion: meetingOccasion,
+  });
 
   const normalizedCompanySettings = useMemo(
     () => normalizeCompanySettings(companySettings),
@@ -3063,8 +3254,12 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
       ...candidateGenerationOptions,
       // 현재 시각 이전 슬롯은 추천하지 않음 (출근 시각이 아닌 now 기준)
       notBefore: new Date(),
+      softPreferences: {
+        avoidSoftTimes: wizard.avoidSoftTimes !== false,
+        avoidBusyDays: wizard.avoidBusyDays !== false,
+      },
     }),
-    [request, people, events, normalizedCompanySettings, rooms, candidateGenerationOptions],
+    [request, people, events, normalizedCompanySettings, rooms, candidateGenerationOptions, wizard.avoidSoftTimes, wizard.avoidBusyDays],
   );
 
   React.useEffect(() => {
@@ -3078,7 +3273,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
   }, [inRecommendationFlow, frozenCandidates, buildCandidates]);
   const attendeeSearchResults = useMemo(() => {
     if (wizard.step !== "attendees") return [];
-    return sortAttendeeSearchResults(people, wizard.search || "", visibleIds, [ME_ID], jobs);
+    return sortAttendeeSearchResults(people, wizard.search || "", visibleIds, [], jobs);
   }, [wizard.step, wizard.search, people, visibleIds, jobs]);
   const current = candidates[Math.min(index, Math.max(0, candidates.length - 1))];
   const handleOpenBlockingEvent = (checkpoint) => {
@@ -3440,9 +3635,17 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
     const selectedPeople = people.filter((p) => wizard.attendees[p.id]);
     return (
       <Overlay onClose={onClose} width={MODAL_WIDTH} disableBackdropClose={disableBackdropClose} exitConfirm={wizardExitConfirm}>
-        <form onSubmit={handleBaseFormSubmit} style={{ display: "flex", flexDirection: "column" }}>
-          <PanelHeader title={wizard.returnToRecommendations ? "조건 수정" : "어떤 일정을 추가할까요?"} onClose={onClose} showClose={!wizard.returnToRecommendations} />
-          <div style={{ padding: "10px 24px" }}>
+        <form onSubmit={handleBaseFormSubmit} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, maxHeight: "88vh" }}>
+          <div style={{ flexShrink: 0 }}>
+            <PanelHeader title={wizard.returnToRecommendations ? "조건 수정" : "어떤 일정을 추가할까요?"} onClose={onClose} showClose={!wizard.returnToRecommendations} />
+          </div>
+          <ModalScrollArea
+            scrollable={detailsRevealed}
+            watchKey={`${detailsRevealed}-${wizard.recommendSettingsOpen}-${attendeeCountAll}-${roomRequired}`}
+            style={detailsRevealed
+              ? { padding: "10px 24px", flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }
+              : { padding: "10px 24px", flexShrink: 0 }}
+          >
             <Field label="제목">
               <input
                 ref={titleInputRef}
@@ -3457,23 +3660,25 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
             <div style={wizardDetailsRevealStyle(detailsRevealed)}>
               {detailsRevealed && (
                 <>
-              <Field label="참석자" labelSuffix={attendeeCountAll}>
+              <Field label="참석자" labelSuffix={attendeeCountAll >= 2 ? attendeeCountAll : null}>
                 <FieldNavButton onClick={openAttendeesStep}>
                   <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: C.ink500, flex: 1, textAlign: "left" }}>참석자 찾기</span>
                   <Search size={18} color={C.ink500} />
                 </FieldNavButton>
-                {selectedPeople.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 20 }}>
-                    {selectedPeople.map((p) => (
-                      <WizardAttendeeRow
-                        key={p.id}
-                        person={p}
-                        jobs={jobs}
-                        isOptional={wizard.attendees[p.id] === "optional"}
-                        onToggleOptional={() => toggleOptional(p.id)}
-                        onRemove={() => removeAttendee(p.id)}
-                      />
-                    ))}
+                {attendeeCountAll >= 2 && (
+                  <div style={{ margin: "20px -8px 0", padding: "0 8px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {selectedPeople.map((p) => (
+                        <WizardAttendeeRow
+                          key={p.id}
+                          person={p}
+                          jobs={jobs}
+                          isOptional={wizard.attendees[p.id] === "optional"}
+                          onToggleOptional={() => toggleOptional(p.id)}
+                          onRemove={() => removeAttendee(p.id)}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </Field>
@@ -3522,7 +3727,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
                       fontSize: 14,
                       fontStyle: "normal",
                       fontSynthesis: "none",
-                      color: C.ink600,
+                      color: C.ink500,
                       textDecoration: "underline",
                       textDecorationThickness: 1,
                       textUnderlineOffset: 2,
@@ -3593,10 +3798,11 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
               <Field label="회의실">
                 <Toggle options={[["필요", true], ["필요없음", false]]} value={roomRequired} onChange={(v) => setWizard({ ...wizard, roomRequired: v, forcedRoomId: v ? wizard.forcedRoomId : null })} />
               </Field>
+              <RecommendationSettingsSection wizard={wizard} setWizard={setWizard} />
                 </>
               )}
             </div>
-          </div>
+          </ModalScrollArea>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "20px 24px 24px", flexShrink: 0 }}>
             {wizard.returnToRecommendations && detailsRevealed && (
               <SecondaryButton compact onClick={backToRecommendations}>취소</SecondaryButton>
@@ -3614,9 +3820,17 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
     const roomRequired = wizard.roomRequired !== false;
     return (
       <Overlay onClose={onClose} disableBackdropClose={disableBackdropClose} exitConfirm={wizardExitConfirm}>
-        <form onSubmit={handleBaseFormSubmit} style={{ display: "flex", flexDirection: "column" }}>
-          <PanelHeader title={wizard.returnToRecommendations ? "조건 수정" : "어떤 일정을 추가할까요?"} onClose={onClose} showClose={!wizard.returnToRecommendations} />
-          <div style={{ padding: "10px 24px" }}>
+        <form onSubmit={handleBaseFormSubmit} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, maxHeight: "88vh" }}>
+          <div style={{ flexShrink: 0 }}>
+            <PanelHeader title={wizard.returnToRecommendations ? "조건 수정" : "어떤 일정을 추가할까요?"} onClose={onClose} showClose={!wizard.returnToRecommendations} />
+          </div>
+          <ModalScrollArea
+            scrollable={detailsRevealed}
+            watchKey={`${detailsRevealed}-${attendeeCountAll}-${roomRequired}-${wizard.dateStr}-${wizard.startHour}-${wizard.endHour}`}
+            style={detailsRevealed
+              ? { padding: "10px 24px", flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }
+              : { padding: "10px 24px", flexShrink: 0 }}
+          >
             <Field label="제목">
               <input
                 ref={titleInputRef}
@@ -3637,25 +3851,27 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
                   <Search size={18} color={C.ink500} />
                 </button>
               </Field>
-              <Field label="참석자" labelSuffix={attendeeCountAll}>
+              <Field label="참석자" labelSuffix={attendeeCountAll >= 2 ? attendeeCountAll : null}>
                 <FieldNavButton onClick={openAttendeesStep}>
                   <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 17, color: C.ink500, flex: 1, textAlign: "left" }}>
                     참석자 찾기
                   </span>
                   <Search size={18} color={C.ink500} />
                 </FieldNavButton>
-                {people.filter((p) => wizard.attendees[p.id]).length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 20 }}>
-                    {people.filter((p) => wizard.attendees[p.id]).map((p) => (
-                      <WizardAttendeeRow
-                        key={p.id}
-                        person={p}
-                        jobs={jobs}
-                        isOptional={wizard.attendees[p.id] === "optional"}
-                        onToggleOptional={() => toggleOptional(p.id)}
-                        onRemove={() => removeAttendee(p.id)}
-                      />
-                    ))}
+                {attendeeCountAll >= 2 && (
+                  <div style={{ margin: "20px -8px 0", padding: "0 8px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {people.filter((p) => wizard.attendees[p.id]).map((p) => (
+                        <WizardAttendeeRow
+                          key={p.id}
+                          person={p}
+                          jobs={jobs}
+                          isOptional={wizard.attendees[p.id] === "optional"}
+                          onToggleOptional={() => toggleOptional(p.id)}
+                          onRemove={() => removeAttendee(p.id)}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </Field>
@@ -3665,7 +3881,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
                 </>
               )}
             </div>
-          </div>
+          </ModalScrollArea>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "20px 24px 24px", flexShrink: 0 }}>
             {wizard.returnToRecommendations && detailsRevealed && (
               <SecondaryButton compact onClick={backToRecommendations}>취소</SecondaryButton>
@@ -3707,10 +3923,10 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
       <Overlay onClose={onClose} minHeight={WIZARD_MODAL_MIN_HEIGHT} height={WIZARD_MODAL_MIN_HEIGHT} disableBackdropClose={disableBackdropClose} exitConfirm={wizardExitConfirm}>
         <PanelHeader title="참석자 추가" onClose={onClose} />
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <div style={{ padding: "10px 24px 0", display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
+          <div style={{ padding: "10px 24px 0", display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>참석자</div>
-              <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.blue }}>{totalAttendeeCount}</div>
+              <div className="modal-section-label" style={{ color: C.ink900 }}>참석자</div>
+              <div className="modal-section-label modal-section-label-accent">{totalAttendeeCount}</div>
             </div>
             <div className="wizard-outline-control" style={{ height: 46, borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, boxSizing: "border-box", background: C.white }}>
               <Search size={18} color={C.ink500} />
@@ -3726,7 +3942,10 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
             </div>
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: selectedPeople.length > 0 ? "12px 24px 16px" : "12px 24px 0" }}>
+          <ModalScrollArea
+            watchKey={`${wizard.search}-${attendeeSearchResults.length}-${selectedPeople.length}`}
+            style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: selectedPeople.length > 0 ? "12px 24px 16px" : "12px 24px 0" }}
+          >
             <div style={{ margin: "0 -8px", padding: "0 8px" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {attendeeSearchResults.map((p, rowIndex) => (
@@ -3748,19 +3967,16 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
                 ))}
               </div>
             </div>
-          </div>
+          </ModalScrollArea>
         </div>
         {selectedPeople.length > 0 && (
-          <>
-            <div style={{ height: 1, background: C.bg2, flexShrink: 0 }} />
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "12px 24px 0", flexShrink: 0 }}>
-              {selectedPeople.map((p) => (
-                <div key={p.id} style={{ border: `1px solid ${C.border}`, borderRadius: 6, height: 28, padding: "7px 8px", display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: C.ink900, cursor: "pointer" }} onClick={() => removeAttendee(p.id)}>
-                  {p.name} <X size={13} color={C.ink500} />
-                </div>
-              ))}
-            </div>
-          </>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "12px 24px 0", flexShrink: 0 }}>
+            {selectedPeople.map((p) => (
+              <div key={p.id} style={{ border: `1px solid ${C.border}`, borderRadius: 6, height: 28, padding: "7px 8px", display: "flex", alignItems: "center", gap: 4, fontSize: 13, color: C.ink900, cursor: "pointer" }} onClick={() => removeAttendee(p.id)}>
+                {p.name} <X size={13} color={C.ink500} />
+              </div>
+            ))}
+          </div>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "20px 24px 24px", flexShrink: 0 }}>
           <SecondaryButton compact onClick={backFromAttendees}>이전</SecondaryButton>
@@ -3919,7 +4135,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
           }}
         >
           <div style={{ padding: "10px 24px 40px 24px" }}>
-            <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900, marginBottom: 20 }}>
+            <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.ink900, marginBottom: 24 }}>
               {isSoloAttendee ? "내 일정에서 가능한 시간을 찾아볼게요" : "가능한 일정을 찾아볼게요"}
             </div>
             <AiThinkingStepList
@@ -3927,6 +4143,8 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
               loadingStepPhase={loadingStepPhase}
               soloOnly={isSoloAttendee}
               roomRequired={roomRequired}
+              avoidSoftTimes={avoidSoftTimes}
+              occasion={meetingOccasion}
               Check={Check}
               Spinner={Spinner}
             />
@@ -3954,7 +4172,10 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
               </div>
             ) : current ? (
               <>
-                <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+                <ModalScrollArea
+                  watchKey={`${currentKey}-${index}-${candidates.length}-${selectedRoomId}-${recommendationLayout?.showRoomSection}-${recommendationLayout?.showReferenceSection}`}
+                  style={{ flex: 1, minHeight: 0, overflowY: "auto" }}
+                >
                   <div
                     style={{
                       padding: `${SECTION_GAP}px 24px 0`,
@@ -3967,9 +4188,9 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
                       <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: currentRequiredMet ? C.blue : C.ink900 }}>
                         {currentRequiredMet ? "확정 가능 일정" : "확인 필요 일정"}
                       </span>
-                      <span style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{index + 1} / {candidates.length}</span>
+                      <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.ink900 }}>{index + 1} / {candidates.length}</span>
                     </div>
-                    <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                       <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 21, color: C.black }}>{current.start.getMonth() + 1}월 {current.start.getDate()}일 {fmtAmPmRange(current.start, current.end)}</div>
                       <div style={{ fontFamily: FONT, fontSize: 13, color: C.ink800 }}>{formatRelativeWeekdayLabel(current.start, getDemoTodayStr())}</div>
                       {candidateCoordinationHint && (
@@ -4038,7 +4259,7 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
                     )}
 
                   </div>
-                </div>
+                </ModalScrollArea>
 
                 <div style={{ display: "flex", justifyContent: "flex-end", padding: "20px 24px 24px", flexShrink: 0 }}>
                   <PrimaryButton compact disabled={!currentSelectable} onClick={() => onConfirm(currentWithRoom, requiredIds, optionalIds, wizard.title)}>선택하기</PrimaryButton>
@@ -4073,19 +4294,122 @@ function Field({ label, labelSuffix, action, children }) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 8,
-          marginBottom: 8,
+          marginBottom: 12,
           width: "100%",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
-          <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900 }}>{label}</div>
+          <div className="modal-section-label" style={{ color: C.ink900 }}>{label}</div>
           {labelSuffix != null && labelSuffix !== "" ? (
-            <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.blue }}>{labelSuffix}</div>
+            <div className="modal-section-label modal-section-label-accent">{labelSuffix}</div>
           ) : null}
         </div>
         {action ?? null}
       </div>
       {children}
+    </div>
+  );
+}
+
+function RecommendationSettingCheckbox({ checked, title, description, onToggle }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 12,
+        width: "100%",
+        padding: 0,
+        margin: 0,
+        border: "none",
+        background: "none",
+        cursor: "pointer",
+        textAlign: "left",
+      }}
+    >
+      <div
+        style={{
+          width: 20,
+          height: 20,
+          borderRadius: 4,
+          background: checked ? C.blue : "none",
+          border: checked ? "none" : `1.5px solid ${hover ? C.blue : C.border}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          transition: "border-color 0.15s ease",
+          flexShrink: 0,
+          marginTop: 1,
+        }}
+      >
+        {checked && <Check size={14} color={C.white} />}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0, flex: 1 }}>
+        <div style={{ fontFamily: FONT, fontWeight: 500, fontSize: 15, color: C.ink900, lineHeight: 1.4 }}>
+          {title}
+        </div>
+        <div style={{ fontFamily: FONT, fontWeight: 400, fontSize: 13, color: C.ink600, lineHeight: 1.4 }}>
+          {description}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function RecommendationSettingsSection({ wizard, setWizard }) {
+  const open = Boolean(wizard.recommendSettingsOpen);
+  const [headerHover, setHeaderHover] = useState(false);
+  return (
+    // 상하 호버 패딩은 섹션 gap 40에 포함되지 않도록 상쇄
+    <div style={{ marginTop: -14 }}>
+      <button
+        type="button"
+        onClick={() => setWizard({ ...wizard, recommendSettingsOpen: !open })}
+        onMouseEnter={() => setHeaderHover(true)}
+        onMouseLeave={() => setHeaderHover(false)}
+        aria-expanded={open}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          width: "calc(100% + 16px)",
+          margin: "0 -8px",
+          padding: "14px 8px",
+          border: "none",
+          borderRadius: 10,
+          background: headerHover ? HOVER_OVERLAY : "transparent",
+          cursor: "pointer",
+          transition: "background 0.15s ease",
+          boxSizing: "border-box",
+        }}
+      >
+        <div className="modal-section-label" style={{ color: C.ink900 }}>추천 조건 설정</div>
+        <span style={{ display: "inline-flex" }}>
+          {open ? <ChevronUp size={18} color={C.ink500} /> : <ChevronDown size={18} color={C.ink500} />}
+        </span>
+      </button>
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+          <RecommendationSettingCheckbox
+            checked={wizard.avoidSoftTimes !== false}
+            title="비선호 시간 추천 줄이기"
+            description="출근 직후, 퇴근 직전, 점심 직후 시간을 낮은 우선순위로 고려해요."
+            onToggle={() => setWizard({ ...wizard, avoidSoftTimes: wizard.avoidSoftTimes === false })}
+          />
+          <RecommendationSettingCheckbox
+            checked={wizard.avoidBusyDays !== false}
+            title="일정 많은 날 추천 줄이기"
+            description="연속 회의 혹은 미팅이 3개 이상 있는 날을 낮은 우선순위로 고려해요."
+            onToggle={() => setWizard({ ...wizard, avoidBusyDays: wizard.avoidBusyDays === false })}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -4116,7 +4440,7 @@ function RoomPicker({ current, selectedRoomId, onSelectRoom }) {
 
   return (
     <div ref={rootRef} style={{ padding: "0 24px", zIndex: open ? 40 : undefined }}>
-      <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: C.ink900, lineHeight: "20px", marginBottom: 10 }}>회의실</div>
+      <div className="modal-section-label" style={{ color: C.ink900, marginBottom: 12 }}>회의실</div>
       {room ? (
         <div style={{ position: "relative" }}>
           <button
@@ -4258,7 +4582,7 @@ function ConfirmedDetailModal({ personId, data, people, onClose, onDelete, onEdi
       </div>
 
       <div style={{ padding: `${EVENT_DETAIL_SECTION_GAP}px 24px ${hasCheckpointsSection ? 0 : 48}px` }}>
-        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, marginBottom: 16 }}>참석자</div>
+        <div className="modal-section-label" style={{ marginBottom: 12, color: C.ink900 }}>참석자</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px 16px" }}>
           {[...requiredPeople, ...optionalPeople].map((p) => {
             const isOptional = optionalPeople.includes(p);
@@ -4298,8 +4622,8 @@ function ConfirmedDetailModal({ personId, data, people, onClose, onDelete, onEdi
 
       {hasCheckpointsSection && (
         <div style={{ padding: `${EVENT_DETAIL_SECTION_GAP}px 24px 48px` }}>
-          <div style={{ marginBottom: 14 }}>
-            <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15 }}>챙길 점 <span style={{ color: C.ink500, fontWeight: 400 }}>(나만 보임)</span></span>
+          <div style={{ marginBottom: 12 }}>
+            <span className="modal-section-label" style={{ color: C.ink900 }}>챙길 점 <span style={{ color: C.ink500, fontWeight: 400 }}>(나만 보임)</span></span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {checkpoints.map((c, i) => (

@@ -46,7 +46,7 @@ export function PanelHeader({ title, onClose }) {
         padding: "24px 24px 20px 24px",
       }}
     >
-      <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 21, color: C.ink900 }}>{title}</span>
+      <span className="panel-header-title">{title}</span>
       <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
         ✕
       </button>

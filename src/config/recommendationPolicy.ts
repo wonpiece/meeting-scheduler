@@ -151,11 +151,19 @@ export interface SlotCandidate {
   tier: RecommendationTier;
 }
 
+export interface SoftPreferenceOptions {
+  /** 비선호 시간(출근 직후·퇴근 직전·점심 직후) 추천 줄이기 — default true */
+  avoidSoftTimes?: boolean;
+  /** 일정 많은 날(연속 회의·미팅 과다) 추천 줄이기 — default true */
+  avoidBusyDays?: boolean;
+}
+
 export interface GenerateCandidatesOptions {
   organizerId: string;
   roomEvents: Record<string, RoomBooking[]>;
   fallbackRooms: Room[];
   notBefore?: Date;
+  softPreferences?: SoftPreferenceOptions;
 }
 
 export interface PurposeInferenceInput {
@@ -704,6 +712,8 @@ export function buildCheckpoints(input: {
   requiredExternalIds: string[];
   organizerId: string;
   skipBufferAndSoftChecks?: boolean;
+  skipSoftTimeChecks?: boolean;
+  skipBusyDayChecks?: boolean;
 }): Checkpoint[] {
   const {
     start,
@@ -719,6 +729,8 @@ export function buildCheckpoints(input: {
     organizerId,
   } = input;
   const skipBufferAndSoftChecks = input.skipBufferAndSoftChecks === true;
+  const skipSoftTimeChecks = input.skipSoftTimeChecks === true || skipBufferAndSoftChecks;
+  const skipBusyDayChecks = input.skipBusyDayChecks === true || skipBufferAndSoftChecks;
   const checkpoints: Checkpoint[] = [];
 
   const unavailableRequired = requiredIds.filter((id) => {
@@ -753,7 +765,7 @@ export function buildCheckpoints(input: {
     });
   }
 
-  if (!skipBufferAndSoftChecks) {
+  if (!skipSoftTimeChecks) {
     if (softFlags.beforeLeaving) {
       checkpoints.push({
         type: "before_leaving",
@@ -825,12 +837,12 @@ export function buildCheckpoints(input: {
     }
   }
 
-  const hasBackToBack = !skipBufferAndSoftChecks && allIds.some(
+  const hasBackToBack = !skipBusyDayChecks && allIds.some(
     (id) =>
       personStatuses[id].state === "available" &&
       getFollowingAdjacentEvent(id, start, input.end, RECOMMENDATION_PHILOSOPHY.adjacentBufferMinutes, events),
   );
-  const backToBackIds = skipBufferAndSoftChecks ? [] : allIds.filter((id) => {
+  const backToBackIds = skipBusyDayChecks ? [] : allIds.filter((id) => {
     if (personStatuses[id].state !== "available") return false;
     return !!getFollowingAdjacentEvent(
       id,
@@ -860,7 +872,7 @@ export function buildCheckpoints(input: {
     }
   }
 
-  const fatiguedIds = skipBufferAndSoftChecks ? [] : allIds.filter((id) => {
+  const fatiguedIds = skipBusyDayChecks ? [] : allIds.filter((id) => {
     if (personStatuses[id].state !== "available") return false;
     return getDayMeetingCount(id, start, events) >= RECOMMENDATION_PHILOSOPHY.fatigueMeetingThreshold;
   });
@@ -1339,17 +1351,21 @@ function evaluateSlot(
     availableRoomCount: availableRooms.length,
   }) ?? "예약 가능한 회의실이에요.";
 
-  const softFlags = isCasualOccasion
+  const softPrefs = options.softPreferences ?? {};
+  const avoidSoftTimes = softPrefs.avoidSoftTimes !== false;
+  const avoidBusyDays = softPrefs.avoidBusyDays !== false;
+
+  const softFlags = isCasualOccasion || !avoidSoftTimes
     ? { justArrived: false, beforeLeaving: false, afterLunch: false }
     : getSoftTimeFlags(start, end, companySettings);
-  const hasBackToBack = isCasualOccasion
+  const hasBackToBack = isCasualOccasion || !avoidBusyDays
     ? false
     : allIds.some(
         (id) =>
           personStatuses[id].state === "available" &&
           getFollowingAdjacentEvent(id, start, end, RECOMMENDATION_PHILOSOPHY.adjacentBufferMinutes, events),
       );
-  const hasFatigue = isCasualOccasion
+  const hasFatigue = isCasualOccasion || !avoidBusyDays
     ? false
     : allIds.some((id) => {
         if (personStatuses[id].state !== "available") return false;
@@ -1391,7 +1407,8 @@ function evaluateSlot(
     selectedRoom: defaultRoom,
     requiredExternalIds: requiredExternal,
     organizerId: options.organizerId,
-    skipBufferAndSoftChecks: isCasualOccasion,
+    skipSoftTimeChecks: isCasualOccasion || !avoidSoftTimes,
+    skipBusyDayChecks: isCasualOccasion || !avoidBusyDays,
   });
 
   let status: CandidateStatus;
@@ -1410,7 +1427,7 @@ function evaluateSlot(
   else if (tier === 2) status = !roomOk ? "needs_coordination" : "has_checkpoints";
   else status = "ready";
 
-  const bufferOkCount = isCasualOccasion
+  const bufferOkCount = isCasualOccasion || !avoidBusyDays
     ? allIds.length
     : allIds.filter(
         (id) =>
