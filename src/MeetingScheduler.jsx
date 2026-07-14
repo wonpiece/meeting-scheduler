@@ -2604,7 +2604,7 @@ function Overlay({ children, onClose, width = MODAL_WIDTH, minHeight, height, an
         style={{
           position: "fixed",
           inset: 0,
-          background: "rgba(17,24,39,0.25)",
+          background: "rgba(17,24,39,0.50)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -3606,7 +3606,8 @@ function CreationWizard({ wizard, setWizard, frozenCandidates: frozenCandidatesP
   );
 
   const handleNext = () => {
-    if (isManualSchedule) {
+    // 캘린더(직접 선택)로 연 경우: 본인 1명만이면 즉시 생성, 2명 이상이면 추천 조회
+    if (isManualSchedule && isSoloAttendee) {
       onQuickCreate(
         wizard.title,
         wizard.dateStr,
